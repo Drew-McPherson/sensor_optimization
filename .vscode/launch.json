@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Phase1: Full Run (enforce gates)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/build_phase1_temperature.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${command:python.interpreterPath}",
+      "args": [
+        "--enforce-gates"
+      ],
+      "justMyCode": true
+    },
+    {
+      "name": "Phase1: Smoke Test (5 files)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/build_phase1_temperature.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${command:python.interpreterPath}",
+      "args": [
+        "--limit-files",
+        "5"
+      ],
+      "justMyCode": true
+    },
+    {
+      "name": "Phase2: Run Notebook Export",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_phase2_notebook.py",
+      "preLaunchTask": "phase2-preflight",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${command:python.interpreterPath}",
+      "justMyCode": true
+    }
+  ]
+}

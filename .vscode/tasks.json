@@ -1,0 +1,118 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "run-phase1-full",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/build_phase1_temperature.py",
+				"--enforce-gates"
+			],
+			"isBackground": false,
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "phase2-preflight",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/run_phase2_notebook.py",
+				"--preflight-only"
+			],
+			"isBackground": false,
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "phase2-smoke-check",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"-c",
+				"from pathlib import Path; import pandas as pd; root=Path('.'); a=root/'artifacts/aligned_phase1_temperature.csv'; s=root/'artifacts/phase1_average_statistics.csv'; print('aligned_exists', a.exists()); print('stats_exists', s.exists()); df=pd.read_csv(a, nrows=5); print('sample_rows', len(df)); print('sensor_cols', len([c for c in df.columns if c.endswith('_temperature') and c != 'average_temperature_all_devices' and c != 'average_temperature_non_imputed_devices']))"
+			],
+			"isBackground": false,
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "run-phase2-notebook",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/run_phase2_notebook.py"
+			],
+			"isBackground": false,
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "run-phase2-notebook-safe",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"phase2-preflight",
+				"run-phase2-notebook"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "run-phase1-then-phase2",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"run-phase1-full",
+				"run-phase2-notebook-safe"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "changelog-check-today",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/check_changelog_entry.py",
+				"--date",
+				"${input:changelogDate}"
+			],
+			"isBackground": false,
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "changelog-check-today-and-file",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/check_changelog_entry.py",
+				"--date",
+				"${input:changelogDate}",
+				"--contains",
+				"${input:changelogFileToken}"
+			],
+			"isBackground": false,
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		}
+	],
+	"inputs": [
+		{
+			"id": "changelogDate",
+			"type": "promptString",
+			"description": "Date token expected in CHANGELOG.md (YYYY-MM-DD)",
+			"default": "YYYY-MM-DD"
+		},
+		{
+			"id": "changelogFileToken",
+			"type": "promptString",
+			"description": "Optional file token that should appear in the new changelog entry",
+			"default": "scripts/build_phase2_temperature_sensors.ipynb"
+		}
+	]
+}

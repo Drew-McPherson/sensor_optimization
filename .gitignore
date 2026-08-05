@@ -1,0 +1,29 @@
+.venv/
+scripts/.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.Rhistory
+
+# Temporary or stray local files
+temp_do_not_use.txt
+.phase2_run_output.txt
+-ErrorAction/
+SilentlyContinue/
+
+# Local reference and archive material not needed in the source repo
+_extracted_text/
+Research/
+Writing/
+Archive/
+*.pdf
+*.docx
+
+# Raw input data stays outside the source-only repo
+Data/files_csv/
+
+# Generated pipeline outputs
+artifacts/*.csv
+artifacts/*.json
+artifacts/*.log
+!artifacts/README.md

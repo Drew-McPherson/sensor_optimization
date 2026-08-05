@@ -1,0 +1,77 @@
+version: 1
+project_name: distributed_monitoring_sensor_poc
+
+global:
+  timezone: UTC
+  bucket_size_seconds: 60
+  join_tolerance_seconds: 30
+  intra_bucket_aggregation: median
+  max_forward_fill_buckets: 2
+  min_devices_per_snapshot: 6
+  drop_snapshot_if_stale_over_threshold: true
+
+phase1:
+  name: temperature_only
+  enabled: true
+  selected_sensors:
+    - Temperature
+  stale_threshold_seconds: 120
+  output_file: artifacts/aligned_phase1_temperature.csv
+
+phase2:
+  name: multivariate
+  enabled: false
+  selected_sensors:
+    - Temperature
+    - Humidity
+    - Gas
+    - Light
+  stale_threshold_seconds_by_sensor:
+    Temperature: 180
+    Humidity: 180
+    Gas: 120
+    Light: 60
+  output_file: artifacts/aligned_phase2_multivariate.csv
+
+quality_gates:
+  schema_validity_min_percent: 100
+  duplicate_key_rate_max_percent: 0.5
+  imputation_rate_max_percent: 20
+  stale_snapshot_rate_max_percent: 10
+  device_coverage_min_percent: 90
+
+confidence_scoring:
+  completeness_weight: 0.7
+  freshness_weight: 0.3
+  formula: "confidence = 0.7 * completeness_component + 0.3 * freshness_component"
+
+summary_statistics:
+  confidence_threshold: 0.75
+  percentiles:
+    - 5
+    - 10
+    - 15
+    - 20
+    - 25
+    - 30
+    - 35
+    - 40
+    - 45
+    - 50
+    - 55
+    - 60
+    - 65
+    - 70
+    - 75
+    - 80
+    - 85
+    - 90
+    - 95
+
+artifacts:
+  raw_index: artifacts/raw_index.csv
+  phase1_aligned: artifacts/aligned_phase1_temperature.csv
+  phase1_average_statistics: artifacts/phase1_average_statistics.csv
+  phase2_aligned: artifacts/aligned_phase2_multivariate.csv
+  qc_report: artifacts/transformation_qc_report.csv
+  decisions_log: artifacts/transformation_decisions.md

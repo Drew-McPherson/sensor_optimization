@@ -1,0 +1,146 @@
+# Transformation Script Usage
+
+## Script
+- `scripts/build_phase1_temperature.py`
+
+## Purpose
+Build the Phase 1 (temperature-only) aligned dataset with explicit audit artifacts, quality metrics, and gate checks.
+
+## Inputs
+1. Config: `config/transformation_defaults.yaml`
+2. Data directory: `Data/files_csv`
+
+## Outputs
+1. `artifacts/raw_index.csv`
+2. `artifacts/aligned_phase1_temperature.csv`
+3. `artifacts/phase1_average_statistics.csv`
+4. `artifacts/transformation_qc_report.csv`
+5. `artifacts/transformation_decisions.md`
+
+For a source-only repository, these outputs are generated locally and may be absent until you run the pipeline.
+
+## Key Columns In `aligned_phase1_temperature.csv`
+1. `average_temperature_all_devices`
+	- Mean temperature across all per-device values that remain in the row after staleness filtering.
+	- Includes both direct and imputed values when those values are retained in the row.
+2. `average_temperature_all_devices_count`
+	- Number of device values included in `average_temperature_all_devices` for that bucket.
+	- Added for auditability so reviewers can see sample size behind each average.
+3. `average_temperature_non_imputed_devices`
+	- Mean temperature across retained per-device values that are not imputed.
+	- Excludes imputed values while following the same staleness-filtered row logic.
+
+## Phase 1 Average Statistics Artifact
+`artifacts/phase1_average_statistics.csv` is generated from aligned Phase 1 rows
+using a strict filter of `snapshot_confidence > 0.75`.
+
+Rules:
+1. The statistics are unweighted; `snapshot_confidence` is only used as a cutoff.
+2. Metrics include mean, standard deviation, and percentiles every 5 points
+   from `p05` through `p95`.
+3. The artifact includes these series:
+	- all-device average (`average_temperature_all_devices`)
+	- non-imputed average (`average_temperature_non_imputed_devices`)
+	- imputation delta (`average_temperature_all_devices - average_temperature_non_imputed_devices`)
+
+## Run Commands
+### Smoke test (small subset)
+`python scripts/build_phase1_temperature.py --limit-files 5`
+
+### Full run (no gate enforcement)
+`python scripts/build_phase1_temperature.py`
+
+### Full run with gate enforcement (non-zero exit on failure)
+`python scripts/build_phase1_temperature.py --enforce-gates`
+
+## Notes
+1. The script logs JSON summary to stdout for machine review.
+2. The decisions log is append-only and records run metadata and gate results.
+3. Install dependency if needed: `pip install pyyaml`
+
+## Phase 2 Notebook
+
+### Notebook
+- `scripts/build_phase2_temperature_sensors.ipynb`
+
+### Purpose
+Run deterministic Phase 2 local-deviation monitoring over aligned Phase 1 snapshots.
+
+The Phase 2 implementation follows the repository precedence rule where
+Distributed_Data_Streams semantics take priority if any wording conflicts.
+
+### Inputs
+1. `artifacts/aligned_phase1_temperature.csv`
+2. `artifacts/phase1_average_statistics.csv`
+
+### Outputs
+1. `artifacts/phase2_temperature_sensors.csv`
+2. `artifacts/phase2_temperature_metrics.json`
+
+For a source-only repository, these outputs are generated locally and may be absent until you run the notebook or `scripts/run_phase2_notebook.py`.
+
+### Logic Summary
+1. Read p90 from `phase1_average_statistics.csv` each run.
+2. Initialize synchronized global and per-sensor reference state from row 1.
+3. Compute per-sensor local deviation each minute: `delta_v_i(t) = v_i(t) - v_i(t0_i)`.
+4. Evaluate local trigger per sensor using `local_deviation >= local_margin`.
+5. Perform one re-sync event for the minute when any local trigger fires.
+6. Apply updated synchronized state starting next row.
+7. If global margin after synchronization is negative, schedule re-sync for the next row.
+8. Use canonical boundary policy for aligned outputs: safe `<` boundary, violated `>=` boundary.
+9. Export per-row trace plus diagnostic metrics.
+
+### Canonical Policies
+1. Global violation label in aligned output: `observed_global_average >= p90_threshold`.
+2. Local trigger rule: `event_{sensor}_local_deviation >= entry_{sensor}_local_margin`.
+3. Trigger evaluation always uses `entry_*` state; any resulting state update is emitted as `exit_*` and applied on the next row.
+4. Logic uses unrounded values; output values are rounded for reporting.
+
+### Phase 2 Row Invariants
+1. `entry_*` fields are the state used to evaluate the current row.
+2. `observed_*` fields are the current minute-bucket values.
+3. `event_*` fields record what happened during the current minute.
+4. `exit_*` fields describe the state that leaves the row and becomes the next row's `entry_*` state.
+5. `transition_summary` is a compact audit field placed near the front of the row.
+
+### Phase 2 Output Highlights
+`artifacts/phase2_temperature_sensors.csv` includes:
+1. Global and transition fields:
+	- `transition_summary`
+	- `observed_global_average`
+	- `entry_xbar_t0`
+	- `entry_delta_global`
+	- `exit_delta_global`
+	- `exit_xbar_t0_if_resync`
+	- `exit_delta_global_if_resync`
+2. Per-sensor fields for each sensor (for example A-H):
+	- `observed_{sensor}_temperature`
+	- `entry_{sensor}_reference_value`
+	- `event_{sensor}_local_deviation`
+	- `entry_{sensor}_local_margin`
+	- `event_{sensor}_resync_requested`
+3. Re-sync control and reason fields:
+	- `event_triggering_sensor_names`
+	- `event_resync_request_count`
+	- `event_any_sensor_requested_resync`
+	- `event_resync_consumed_from_prior_row`
+	- `event_resync_triggered_by_local_violation`
+	- `event_resync_performed`
+	- `event_resync_reason`
+	- `event_exit_delta_negative`
+	- `exit_resync_scheduled_next_row`
+4. Communication fields:
+	- `trigger_message_count`
+	- `request_message_count`
+	- `response_message_count`
+	- `broadcast_message_count`
+	- `total_message_count`
+
+### Metrics Output Highlights
+`artifacts/phase2_temperature_metrics.json` includes:
+1. Policy metadata (`boundary_policy`, `trigger_policy`).
+2. Confusion matrix plus diagnostic recall and precision.
+3. Communication totals by category and two reduction ratios:
+	- primary ratio using `distributed_total_messages`
+	- legacy comparator using `distributed_trigger_messages`
+4. Re-sync event counters and detection delay by actual-positive windows.
