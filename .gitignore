@@ -21,9 +21,14 @@ Archive/
 
 # Raw input data stays outside the source-only repo
 Data/files_csv/
+Data/
+
+# Archived script material should stay out of the active source tree
+scripts/Archive/
 
 # Generated pipeline outputs
 artifacts/*.csv
 artifacts/*.json
 artifacts/*.log
+artifacts/transformation_decisions.md
 !artifacts/README.md
