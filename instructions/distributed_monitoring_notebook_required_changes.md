@@ -473,6 +473,13 @@ total_message_count
 
 When a negative delta schedules a re-synchronization for the next minute, the re-synchronization may not have a new sensor trigger message.
 
+When that scheduled event is consumed on the next row, treat it as a forced synchronization row:
+
+1. Perform synchronization immediately from the current snapshot.
+2. Do not evaluate local trigger conditions against the prior entry margins on that row.
+3. Set all per-sensor local trigger bits to `0` for that row.
+4. Keep trigger message count at `0`; count only request/response/broadcast fanout.
+
 For that event:
 
 ```python
@@ -486,7 +493,7 @@ total_message_count = 3 * n
 The cause should be logged as:
 
 ```python
-resync_reason = "negative_delta_from_prior_minute"
+resync_reason = "negative_delta_from_prior_row"
 ```
 
 ### Multiple triggering sensors
@@ -661,6 +668,20 @@ request_message_count = n
 response_message_count = n
 broadcast_message_count = n
 ```
+
+For rows where `event_resync_consumed_from_prior_row == 1`:
+
+```text
+trigger_message_count = 0
+event_resync_request_count = 0
+event_any_sensor_requested_resync = 0
+event_resync_triggered_by_local_violation = 0
+```
+
+The corrected implementation should also enforce:
+
+1. `event_resync_consumed_from_prior_row == 1` implies `trigger_message_count == 0`.
+2. A row cannot represent the same synchronization as both forced and locally triggered unless separate modeled events are explicitly introduced.
 
 ---
 

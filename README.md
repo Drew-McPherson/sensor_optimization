@@ -10,6 +10,16 @@ This repository contains the temperature sensor transformation and monitoring wo
 - [scripts/README.md](scripts/README.md) — script usage and Phase 1/Phase 2 workflow notes.
 - [artifacts/README.md](artifacts/README.md) — generated artifact inventory and expectations.
 
+## Reporting output
+
+After generating Phase 2 outputs, you can build CSV-first report artifacts:
+
+1. Run [scripts/export_phase2_report_csvs.py](scripts/export_phase2_report_csvs.py).
+2. Outputs are written to:
+3. [artifacts/phase2_data_dictionary.csv](artifacts/phase2_data_dictionary.csv)
+4. [artifacts/phase2_sensor_reduction_analysis.csv](artifacts/phase2_sensor_reduction_analysis.csv)
+5. [artifacts/phase2_raw_row_results.csv](artifacts/phase2_raw_row_results.csv)
+
 ## Instruction documents
 
 Instruction-style documentation now lives under [instructions](instructions):

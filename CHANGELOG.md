@@ -174,6 +174,67 @@ This file tracks implemented changes in this repository.
   - Removes the main machine-specific publication leaks while keeping the executable workflow and documentation intact.
   - Establishes a clear source-only repository boundary so collaborators regenerate raw outputs locally rather than pulling them from Git history.
 
+### 15. Corrected forced re-sync row semantics to prevent false local trigger traffic
+- Summary:
+  - Refactored the Phase 2 state-machine row loop so rows that consume a scheduled re-sync from the prior row are treated as forced synchronization events.
+  - Forced rows now skip local trigger evaluation against prior entry margins, set all per-sensor `event_{sensor}_resync_requested` values to `0`, and keep `trigger_message_count = 0`.
+  - Preserved forced re-sync fanout counting (`request/response/broadcast`) and added invariant assertions to guard forced-row semantics.
+  - Removed same-row forced+local dual-cause labeling behavior for the current model.
+  - Updated Phase 2 documentation and implementation guidance to reflect the corrected forced-row policy and acceptance checks.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/README.md
+  - instructions/distributed_monitoring_notebook_required_changes.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Prevents negative-margin forced rows from generating spurious local trigger messages.
+  - Makes communication totals and classification-style diagnostics reflect distinct forced synchronization vs local-trigger events.
+
+### 16. Fixed phase2-smoke-check task quoting for PowerShell execution
+- Summary:
+  - Replaced the inline `python -c` smoke-check command with a script-backed task that executes `scripts/phase2_smoke_check.py`.
+  - Removed shell-dependent quoting complexity that caused inline command parsing failures in PowerShell.
+- Affected files:
+  - .vscode/tasks.json
+  - scripts/phase2_smoke_check.py
+  - CHANGELOG.md
+- Rationale and impact:
+  - Restores one-command smoke validation in VS Code tasks for Windows PowerShell environments.
+  - Makes the smoke check easier to maintain and portable across shells.
+
+### 17. Added Phase 2 multi-tab Excel report export
+- Summary:
+  - Added a dedicated Phase 2 report exporter that writes a three-tab Excel workbook for inclusion-ready reporting.
+  - Implemented `Data Dictionary`, `Sensor Reduction Analysis`, and `Raw Row Results` sheets in a fixed order.
+  - Defined analysis tab calculations for baseline every-minute communication, actual POC communication, absolute difference, and primary reduction ratio/percent.
+  - Added a VS Code task for one-command workbook generation and updated repository documentation.
+- Affected files:
+  - scripts/export_phase2_to_excel.py
+  - .vscode/tasks.json
+  - scripts/README.md
+  - README.md
+  - requirements.txt
+  - CHANGELOG.md
+- Rationale and impact:
+  - Provides a shareable Excel deliverable without changing Phase 2 state-machine behavior.
+  - Improves stakeholder communication by combining metric interpretation and raw traceability in one workbook.
+
+### 18. Switched reporting workflow to CSV-first Phase 2 exports
+- Summary:
+  - Added a dedicated CSV-first exporter that generates three report artifacts: data dictionary, sensor reduction analysis, and raw row results.
+  - Updated the VS Code task to run CSV export directly and removed the Excel dependency from required packages.
+  - Updated repository and script documentation to describe CSV outputs and defer workbook stitching to a later step.
+- Affected files:
+  - scripts/export_phase2_report_csvs.py
+  - .vscode/tasks.json
+  - scripts/README.md
+  - README.md
+  - requirements.txt
+  - CHANGELOG.md
+- Rationale and impact:
+  - Reduces failure risk from large workbook writes while preserving the full reporting content.
+  - Keeps outputs easy to validate, diff, and package later into workbook tabs when needed.
+
 ## Notes
 
 - Archive files were intentionally not modified unless explicitly requested.
