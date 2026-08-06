@@ -102,6 +102,7 @@ For a source-only repository, these outputs are generated locally and may be abs
 4. Forced rows (`event_resync_consumed_from_prior_row == 1`) do not run local trigger evaluation and must keep all `event_{sensor}_resync_requested` bits at `0`.
 5. Forced rows must report `trigger_message_count = 0`; only request/response/broadcast fanout is counted for that row's synchronization.
 6. Logic uses unrounded values; output values are rounded for reporting.
+7. Correctness metrics use implemented row-local synchronization (`event_resync_performed`) rather than request generation (`event_any_sensor_requested_resync`).
 
 ### Phase 2 Row Invariants
 1. `entry_*` fields are the state used to evaluate the current row.
@@ -142,15 +143,43 @@ For a source-only repository, these outputs are generated locally and may be abs
 	- `response_message_count`
 	- `broadcast_message_count`
 	- `total_message_count`
+5. Correctness observability fields:
+	- `centralized_constraint_state`
+	- `distributed_constraint_state`
+	- `distributed_alert`
+	- `false_safe`
+	- `false_alert`
+	- `violation_detection_delay_buckets`
+
+Correctness interpretation:
+1. `event_any_sensor_requested_resync` remains the request-generation trace for local sensor warnings.
+2. `event_resync_performed` is the canonical implemented-mitigation trace for the current minute.
+3. `distributed_alert` mirrors `event_resync_performed` for row-level correctness reporting.
+4. `false_safe` means the centralized system was violating and no re-sync was implemented on that same row.
+5. `false_alert` means a re-sync was implemented on a row where the centralized system remained feasible.
 
 ### Metrics Output Highlights
 `artifacts/phase2_temperature_metrics.json` includes:
 1. Policy metadata (`boundary_policy`, `trigger_policy`).
-2. Confusion matrix plus diagnostic recall and precision.
+2. Confusion matrix plus diagnostic recall and precision, using `event_resync_performed` as the predicted-positive rule.
 3. Communication totals by category and two reduction ratios:
 	- primary ratio using `distributed_total_messages`
 	- legacy comparator using `distributed_trigger_messages`
 4. Re-sync event counters and detection delay by actual-positive windows.
+5. Observability aliases and counters:
+	- `false_negative_count` (alias of confusion `fn`)
+	- `false_positive_count` (alias of confusion `fp`)
+	- `false_safe_count` (sum of row-level `false_safe`)
+	- `false_alert_count` (sum of row-level `false_alert`)
+
+Metric interpretation note:
+1. `false_negative_count` now counts violating rows with no implemented re-sync on the same row.
+2. `false_positive_count` now counts implemented re-sync rows whose centralized state remained feasible.
+3. These metrics are intentionally distinct from request-only warning counts.
+
+Observability note:
+1. These correctness fields are reporting-only in the current phase.
+2. The run is not failed when false-safe or false-alert rows are present.
 
 ## Phase 2 CSV Report Export
 

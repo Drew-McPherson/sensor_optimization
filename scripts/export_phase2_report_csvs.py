@@ -175,6 +175,42 @@ def _describe_column(column: str, sensor_names: set[str]) -> dict[str, str]:
             "calculation": "trigger_message_count + request_message_count + response_message_count + broadcast_message_count.",
             "units": "messages",
         },
+        "centralized_constraint_state": {
+            "category": "correctness",
+            "measures": "Centralized oracle threshold state for this row.",
+            "calculation": "VIOLATING when global_violation == 1, else FEASIBLE.",
+            "units": "categorical",
+        },
+        "distributed_constraint_state": {
+            "category": "correctness",
+            "measures": "Distributed monitor state representation for this row.",
+            "calculation": "VIOLATING when event_resync_performed == 1, else FEASIBLE.",
+            "units": "categorical",
+        },
+        "distributed_alert": {
+            "category": "correctness",
+            "measures": "Distributed implemented-resync indicator for this row.",
+            "calculation": "Mirrors event_resync_performed.",
+            "units": "binary (0/1)",
+        },
+        "false_safe": {
+            "category": "correctness",
+            "measures": "Rows where centralized state violates and no distributed re-sync was implemented on that row.",
+            "calculation": "1 when global_violation == 1 and event_resync_performed == 0.",
+            "units": "binary (0/1)",
+        },
+        "false_alert": {
+            "category": "correctness",
+            "measures": "Rows where a distributed re-sync was implemented while centralized state is feasible.",
+            "calculation": "1 when global_violation == 0 and event_resync_performed == 1.",
+            "units": "binary (0/1)",
+        },
+        "violation_detection_delay_buckets": {
+            "category": "correctness",
+            "measures": "Per-row delay marker for first distributed detection within a contiguous violation window.",
+            "calculation": "Window-level first-hit lag projected onto rows belonging to that violation window.",
+            "units": "buckets",
+        },
     }
 
     if column in static:
@@ -293,12 +329,10 @@ def _build_reduction_analysis(metrics: dict[str, Any]) -> pd.DataFrame:
 
     difference = baseline - actual
     ratio = 1.0 - (actual / baseline)
-    percent = ratio * 100.0
+    percent = round(ratio * 100.0, 2)
 
-    ratio_from_metrics = communication.get("communication_reduction_ratio_primary")
-    ratio_delta = None
-    if isinstance(ratio_from_metrics, (int, float)):
-        ratio_delta = ratio - float(ratio_from_metrics)
+    false_safe_count = metrics.get("false_safe_count")
+    false_alert_count = metrics.get("false_alert_count")
 
     analysis_rows = [
         {
@@ -323,15 +357,8 @@ def _build_reduction_analysis(metrics: dict[str, Any]) -> pd.DataFrame:
             "notes": "Absolute communication reduction achieved by the POC.",
         },
         {
-            "metric": "reduction_ratio_primary",
-            "value": ratio,
-            "units": "ratio",
-            "calculation": "1 - (poc_actual_messages / baseline_every_minute_messages)",
-            "notes": "Primary reduction ratio agreed for reporting.",
-        },
-        {
             "metric": "reduction_percent_primary",
-            "value": percent,
+            "value": f"{percent:.2f}",
             "units": "percent",
             "calculation": "reduction_ratio_primary * 100",
             "notes": "Primary reduction expressed as percentage.",
@@ -394,25 +421,25 @@ def _build_reduction_analysis(metrics: dict[str, Any]) -> pd.DataFrame:
             }
         )
 
-    if isinstance(ratio_from_metrics, (int, float)):
+    if isinstance(false_safe_count, (int, float)):
         analysis_rows.append(
             {
-                "metric": "reduction_ratio_primary_from_metrics",
-                "value": float(ratio_from_metrics),
-                "units": "ratio",
-                "calculation": "metrics.communication.communication_reduction_ratio_primary",
-                "notes": "Recorded metric from notebook output for parity checking.",
+                "metric": "false_safe_count",
+                "value": int(round(float(false_safe_count))),
+                "units": "count",
+                "calculation": "sum(false_safe)",
+                "notes": "Row-level observability counter for violating rows with no implemented distributed re-sync.",
             }
         )
 
-    if ratio_delta is not None:
+    if isinstance(false_alert_count, (int, float)):
         analysis_rows.append(
             {
-                "metric": "ratio_delta_computed_minus_metrics",
-                "value": ratio_delta,
-                "units": "ratio",
-                "calculation": "reduction_ratio_primary - reduction_ratio_primary_from_metrics",
-                "notes": "Should be near zero; non-zero indicates rounding or contract mismatch.",
+                "metric": "false_alert_count",
+                "value": int(round(float(false_alert_count))),
+                "units": "count",
+                "calculation": "sum(false_alert)",
+                "notes": "Row-level observability counter for implemented distributed re-sync rows on centralized FEASIBLE minutes.",
             }
         )
 

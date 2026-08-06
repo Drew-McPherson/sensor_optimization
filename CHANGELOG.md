@@ -235,6 +235,61 @@ This file tracks implemented changes in this repository.
   - Reduces failure risk from large workbook writes while preserving the full reporting content.
   - Keeps outputs easy to validate, diff, and package later into workbook tabs when needed.
 
+## 2026-08-06
+
+### 19. Added Phase 2 correctness observability fields and alias metrics (non-gating)
+- Summary:
+  - Added row-level centralized-vs-distributed observability fields to Phase 2 output: `centralized_constraint_state`, `distributed_constraint_state`, `distributed_alert`, `false_safe`, `false_alert`, and `violation_detection_delay_buckets`.
+  - Added explicit run-level alias counters in metrics: `false_negative_count`, `false_positive_count`, `false_safe_count`, and `false_alert_count`.
+  - Updated CSV report export logic and script documentation to include the new observability schema.
+  - Kept behavior observational only: no fail-run gate was introduced for false-safe or false-alert rows.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/export_phase2_report_csvs.py
+  - scripts/README.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes row-level correctness behavior directly inspectable alongside communication metrics.
+  - Preserves current experimentation workflow by reporting contradictions without blocking execution.
+
+### 20. Simplified reduction analysis metrics for CSV report consumption
+- Summary:
+  - Removed `reduction_ratio_primary` from `phase2_sensor_reduction_analysis.csv` output.
+  - Rounded `reduction_percent_primary` values to two decimal places.
+  - Removed `reduction_ratio_primary_from_metrics` from `phase2_sensor_reduction_analysis.csv` output.
+- Affected files:
+  - scripts/export_phase2_report_csvs.py
+  - CHANGELOG.md
+- Rationale and impact:
+  - Aligns the analysis artifact with requested reporting format and reduces redundant ratio fields.
+
+### 21. Redefined correctness metrics around implemented re-synchronization
+- Summary:
+  - Changed Phase 2 row-level correctness fields so `distributed_alert`, `false_safe`, and `false_alert` are based on `event_resync_performed` rather than request-generation bits.
+  - Changed confusion-matrix diagnostics so predicted-positive means an implemented re-synchronization occurred on the current row.
+  - Updated report/dictionary text and README documentation to distinguish request generation from implemented mitigation.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/export_phase2_report_csvs.py
+  - scripts/README.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Prevents forced re-sync rows from being misclassified as missed violations solely because local warning evaluation was intentionally skipped.
+  - Aligns false-safe/false-negative reporting with the user-requested operational question: whether a violating minute lacked an implemented re-synchronization.
+
+### 22. Removed selected correctness metrics from reduction analysis CSV
+- Summary:
+  - Removed `ratio_delta_computed_minus_metrics` from `phase2_sensor_reduction_analysis.csv` output.
+  - Removed `false_negative_count` from `phase2_sensor_reduction_analysis.csv` output.
+  - Removed `false_positive_count` from `phase2_sensor_reduction_analysis.csv` output.
+- Affected files:
+  - scripts/export_phase2_report_csvs.py
+  - artifacts/phase2_sensor_reduction_analysis.csv
+  - CHANGELOG.md
+- Rationale and impact:
+  - Keeps the reduction analysis artifact focused on communication and selected observability counters.
+  - Avoids duplicating confusion-matrix-oriented fields in this report output.
+
 ## Notes
 
 - Archive files were intentionally not modified unless explicitly requested.
