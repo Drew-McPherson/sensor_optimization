@@ -85,7 +85,8 @@ For a source-only repository, these outputs are generated locally and may be abs
 ### Logic Summary
 1. Read p90 from `phase1_average_statistics.csv` each run using the all-devices series `all_devices_including_imputed`.
 2. Initialize synchronized global and per-sensor reference state from row 1 using the all-devices global average column `average_temperature_all_devices`.
-3. Compute per-sensor local deviation each minute: `delta_v_i(t) = v_i(t) - v_i(t0_i)`.
+3. Compute the row-level observed global average for each minute as the arithmetic mean of the current row's observed sensor readings.
+4. Compute per-sensor local deviation each minute: `delta_v_i(t) = v_i(t) - v_i(t0_i)`.
 4. If a re-sync was scheduled from the prior row, consume that forced re-sync first and skip local trigger evaluation for that row.
 5. Otherwise evaluate local trigger per sensor using `local_deviation >= local_margin`.
 6. Perform one re-sync event for the minute when any local trigger fires.
@@ -97,13 +98,14 @@ For a source-only repository, these outputs are generated locally and may be abs
 
 ### Canonical Policies
 1. Global violation label in aligned output: `observed_global_average >= p90_threshold`.
-2. The Phase 2 implementation uses the strict all-devices policy for both the observed global average and the p90 threshold source.
-2. Local trigger rule: `event_{sensor}_local_deviation >= entry_{sensor}_local_margin`.
+2. The Phase 2 implementation uses the strict all-devices p90 threshold source while computing the row-level observed global average directly from the current minute's sensor readings.
+3. Local trigger rule: `event_{sensor}_local_deviation >= entry_{sensor}_local_margin`.
 3. Trigger evaluation always uses `entry_*` state; any resulting state update is emitted as `exit_*` and applied on the next row.
 4. Forced rows (`event_resync_consumed_from_prior_row == 1`) do not run local trigger evaluation and must keep all `event_{sensor}_resync_requested` bits at `0`.
 5. Forced rows must report `trigger_message_count = 0`; only request/response/broadcast fanout is counted for that row's synchronization.
-6. Logic uses unrounded values; output values are rounded for reporting.
-7. Correctness metrics use implemented row-local synchronization (`event_resync_performed`) rather than request generation (`event_any_sensor_requested_resync`).
+6. Logic uses unrounded values; exported numeric values are rounded to 4 decimal places for reporting.
+7. The CSV export pipeline applies the 4-decimal reporting convention consistently to exported numeric columns in the row trace and report artifacts.
+8. Correctness metrics use implemented row-local synchronization (`event_resync_performed`) rather than request generation (`event_any_sensor_requested_resync`).
 
 ### Phase 2 Row Invariants
 1. `entry_*` fields are the state used to evaluate the current row.

@@ -110,6 +110,42 @@
 			"options": {
 				"cwd": "${workspaceFolder}"
 			}
+		},
+		{
+			"label": "phase2-validate-export-policy",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/validate_phase2_export_policy.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "phase2-export-csv-reports",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/export_phase2_report_csvs.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "phase2-validate-export-policy",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/validate_phase2_export_policy.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-phase2-notebook",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"scripts/run_phase2_notebook.py"
+			],
+			"isBackground": false
 		}
 	],
 	"inputs": [

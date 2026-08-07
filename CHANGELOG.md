@@ -6,7 +6,49 @@ This file tracks implemented changes in this repository.
 
 ## 2026-08-07
 
-### 1. Switched Phase 2 to the strict all-devices policy
+### 1. Reordered Phase 2 row output columns for resync state fields
+- Summary:
+  - Updated the Phase 2 row output schema so `exit_xbar_t0_if_resync` appears immediately after `entry_xbar_t0`, `exit_delta_global_if_resync` appears immediately after `entry_delta_global`, and the standalone `exit_delta_global` column is removed.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - artifacts/phase2_temperature_sensors.csv
+  - artifacts/phase2_raw_row_results.csv
+- Behavior change:
+  - Generated Phase 2 row exports now present the resync-state columns in the requested order without the legacy `exit_delta_global` field.
+
+### 2. Removed bucket_epoch from Phase 2 reduction-analysis exports
+- Summary:
+  - Hardened the Phase 2 CSV report export so the reduction-analysis output does not include a `bucket_epoch` column even if a future upstream change introduces it.
+- Affected files:
+  - scripts/export_phase2_report_csvs.py
+  - artifacts/phase2_sensor_reduction_analysis.csv
+- Behavior change:
+  - The generated reduction-analysis CSV continues to expose only the metric summary columns and no longer carries a bucket epoch field.
+
+### 3. Standardized Phase 2 export rounding to 4 decimal places
+- Summary:
+  - Updated the Phase 2 CSV report exporter to round exported numeric values to 4 decimal places consistently at the reporting boundary.
+  - Added a lightweight validation script to check the exported schema and rounding policy for the Phase 2 artifacts.
+- Affected files:
+  - scripts/export_phase2_report_csvs.py
+  - scripts/validate_phase2_export_policy.py
+  - scripts/README.md
+  - CHANGELOG.md
+- Behavior change:
+  - The exported row-trace and reduction-analysis CSVs now follow the same 4-decimal reporting convention without introducing a shared rounding helper abstraction.
+
+### 4. Switched Phase 2 observed-global-average to the current row's sensor mean
+- Summary:
+  - Updated the Phase 2 notebook logic to derive `observed_global_average` from the arithmetic mean of the current row's sensor readings rather than the Phase 1 global-average column.
+  - Updated the Phase 2 documentation to reflect the new row-level semantics for the observed global average.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/README.md
+  - CHANGELOG.md
+- Behavior change:
+  - Generated Phase 2 row outputs now report the observed global average based on the same minute's sensor values that the state machine is evaluating.
+
+### 4. Switched Phase 2 to the strict all-devices policy
 - Summary:
   - Updated Phase 2 notebook logic to use `average_temperature_all_devices` as the global observation source.
   - Updated Phase 2 p90 selection to use the `all_devices_including_imputed` row from `phase1_average_statistics.csv`.

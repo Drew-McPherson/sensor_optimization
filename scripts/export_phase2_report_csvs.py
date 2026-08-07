@@ -443,13 +443,20 @@ def _build_reduction_analysis(metrics: dict[str, Any]) -> pd.DataFrame:
             }
         )
 
-    return pd.DataFrame(analysis_rows)
+    reduction_analysis = pd.DataFrame(analysis_rows)
+    if "bucket_epoch" in reduction_analysis.columns:
+        reduction_analysis = reduction_analysis.drop(columns=["bucket_epoch"])
+    return reduction_analysis
 
 
 def _write_csv_atomic(df: pd.DataFrame, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    df.to_csv(tmp_path, index=False)
+    rounded_df = df.copy()
+    for column in rounded_df.columns:
+        if rounded_df[column].dtype.kind in "ifc":
+            rounded_df[column] = rounded_df[column].round(4)
+    rounded_df.to_csv(tmp_path, index=False)
     tmp_path.replace(output_path)
 
 
