@@ -83,8 +83,8 @@ Distributed_Data_Streams semantics take priority if any wording conflicts.
 For a source-only repository, these outputs are generated locally and may be absent until you run the notebook or `scripts/run_phase2_notebook.py`.
 
 ### Logic Summary
-1. Read p90 from `phase1_average_statistics.csv` each run.
-2. Initialize synchronized global and per-sensor reference state from row 1.
+1. Read p90 from `phase1_average_statistics.csv` each run using the all-devices series `all_devices_including_imputed`.
+2. Initialize synchronized global and per-sensor reference state from row 1 using the all-devices global average column `average_temperature_all_devices`.
 3. Compute per-sensor local deviation each minute: `delta_v_i(t) = v_i(t) - v_i(t0_i)`.
 4. If a re-sync was scheduled from the prior row, consume that forced re-sync first and skip local trigger evaluation for that row.
 5. Otherwise evaluate local trigger per sensor using `local_deviation >= local_margin`.
@@ -97,6 +97,7 @@ For a source-only repository, these outputs are generated locally and may be abs
 
 ### Canonical Policies
 1. Global violation label in aligned output: `observed_global_average >= p90_threshold`.
+2. The Phase 2 implementation uses the strict all-devices policy for both the observed global average and the p90 threshold source.
 2. Local trigger rule: `event_{sensor}_local_deviation >= entry_{sensor}_local_margin`.
 3. Trigger evaluation always uses `entry_*` state; any resulting state update is emitted as `exit_*` and applied on the next row.
 4. Forced rows (`event_resync_consumed_from_prior_row == 1`) do not run local trigger evaluation and must keep all `event_{sensor}_resync_requested` bits at `0`.

@@ -46,13 +46,13 @@ def _describe_column(column: str, sensor_names: set[str]) -> dict[str, str]:
         "p90_threshold_used": {
             "category": "threshold",
             "measures": "Global P90 threshold used for this run.",
-            "calculation": "Loaded from phase1_average_statistics.csv for the selected series.",
+            "calculation": "Loaded from phase1_average_statistics.csv for the all-devices series all_devices_including_imputed.",
             "units": "temperature",
         },
         "observed_global_average": {
             "category": "global",
             "measures": "Current row global average temperature.",
-            "calculation": "From Phase 1 aligned field average_temperature_all_devices.",
+            "calculation": "From Phase 1 aligned field average_temperature_all_devices using the strict all-devices policy.",
             "units": "temperature",
         },
         "entry_xbar_t0": {

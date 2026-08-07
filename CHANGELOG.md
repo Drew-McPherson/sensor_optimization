@@ -4,6 +4,26 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-08-07
+
+### 1. Switched Phase 2 to the strict all-devices policy
+- Summary:
+  - Updated Phase 2 notebook logic to use `average_temperature_all_devices` as the global observation source.
+  - Updated Phase 2 p90 selection to use the `all_devices_including_imputed` row from `phase1_average_statistics.csv`.
+  - Updated Phase 2 documentation and generated metadata to reflect the new all-devices policy.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/README.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - scripts/export_phase2_report_csvs.py
+  - scripts/export_phase2_to_excel.py
+  - artifacts/phase2_temperature_sensors.csv (regenerated)
+  - artifacts/phase2_temperature_metrics.json (regenerated)
+  - artifacts/phase2_data_dictionary.csv (regenerated)
+  - artifacts/phase2_raw_row_results.csv (regenerated)
+- Behavior change:
+  - Phase 2 now uses the all-devices average and all-devices p90 threshold as the strict policy source.
+
 1. Record every implemented code or documentation change in this file.
 2. Add entries in chronological order.
 3. Include affected files and a short rationale.

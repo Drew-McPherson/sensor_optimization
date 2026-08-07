@@ -118,13 +118,11 @@ Required columns in aligned Phase 1 input:
 1. bucket_epoch.
 2. bucket_time_utc.
 3. per-sensor temperature columns (for example A_temperature through H_temperature).
-4. average_temperature_non_imputed_devices (preferred global average).
-5. fallback average_temperature_all_devices if preferred column is unavailable.
+4. average_temperature_all_devices (strict global average source).
 
 ### 6.2 Threshold Derivation
 1. Read p90 from phase1_average_statistics.csv each run.
-2. Preferred series: non_imputed_devices_only.
-3. Fallback series: all_devices_including_imputed.
+2. Preferred series: all_devices_including_imputed.
 
 ### 6.3 State Initialization
 For first row (t0):
