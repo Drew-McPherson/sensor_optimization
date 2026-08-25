@@ -97,18 +97,6 @@ def _describe_column(column: str, sensor_names: set[str]) -> dict[str, str]:
             "calculation": "1 when event_resync_request_count > 0, else 0.",
             "units": "binary (0/1)",
         },
-        "event_resync_consumed_from_prior_row": {
-            "category": "event",
-            "measures": "Whether row consumed a forced re-sync scheduled by prior row.",
-            "calculation": "Equals prior row exit_resync_scheduled_next_row.",
-            "units": "binary (0/1)",
-        },
-        "event_resync_triggered_by_local_violation": {
-            "category": "event",
-            "measures": "Whether row triggered re-sync due to local violations.",
-            "calculation": "1 when no forced consumption and any local request is present.",
-            "units": "binary (0/1)",
-        },
         "event_resync_performed": {
             "category": "event",
             "measures": "Whether a re-sync event was executed on this row.",
@@ -245,17 +233,6 @@ def _describe_column(column: str, sensor_names: set[str]) -> dict[str, str]:
             "units": "temperature",
         }
 
-    sensor_margin = re.match(r"^entry_(.+)_local_margin$", column)
-    if sensor_margin:
-        sensor = sensor_margin.group(1)
-        return {
-            "field_name": column,
-            "category": "sensor_state",
-            "measures": f"Entry local trigger margin for sensor {sensor}.",
-            "calculation": f"p90_threshold_used - entry_{sensor}_reference_value.",
-            "units": "temperature",
-        }
-
     sensor_deviation = re.match(r"^event_(.+)_local_deviation$", column)
     if sensor_deviation:
         sensor = sensor_deviation.group(1)
@@ -267,6 +244,17 @@ def _describe_column(column: str, sensor_names: set[str]) -> dict[str, str]:
             "units": "temperature",
         }
 
+    sensor_margin_score = re.match(r"^event_(.+)_margin_proximity_score$", column)
+    if sensor_margin_score:
+        sensor = sensor_margin_score.group(1)
+        return {
+            "field_name": column,
+            "category": "sensor_event",
+            "measures": f"Row margin proximity score for sensor {sensor} (positive=acceptable, negative=violating).",
+            "calculation": f"entry_delta_global - event_{sensor}_local_deviation.",
+            "units": "temperature",
+        }
+
     sensor_request = re.match(r"^event_(.+)_resync_requested$", column)
     if sensor_request:
         sensor = sensor_request.group(1)
@@ -274,7 +262,7 @@ def _describe_column(column: str, sensor_names: set[str]) -> dict[str, str]:
             "field_name": column,
             "category": "sensor_event",
             "measures": f"Whether sensor {sensor} requested re-sync on this row.",
-            "calculation": f"1 when event_{sensor}_local_deviation >= entry_{sensor}_local_margin and row is not forced; else 0.",
+            "calculation": f"1 when event_{sensor}_margin_proximity_score <= 0 and row is not forced; else 0.",
             "units": "binary (0/1)",
         }
 

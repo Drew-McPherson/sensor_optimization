@@ -3,5 +3,12 @@
   "python.terminal.executeInFileDir": false,
   "python.analysis.exclude": [
     "**/.venv/**"
-  ]
+  ],
+  "chat.tools.terminal.autoApprove": {
+    "import": true,
+    "/^python scripts/run_phase2_notebook\\.py --preflight-only$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  }
 }

@@ -132,6 +132,12 @@ For first row (t0):
 4. local_margin_values[s] are assigned from the active global margin policy for each sensor s.
 5. resync_due_next_row = 0.
 
+Bootstrap edge-case note:
+1. This implementation intentionally preserves the startup phenomenon where a sensor may have no usable value at the first row and therefore carries a null or blank reference/deviation state for a bounded initialization window.
+2. This is treated as a known bootstrap condition for the deterministic experiment, not as a production-quality sensor health correction.
+3. The phenomenon is retained because it is part of the scenario being studied: exposure to cold-start state initialization, not a silent data-quality repair.
+4. Any future variant that eliminates this startup gap must be treated as a deliberate modeling change, not as a bug fix to the current deterministic policy.
+
 ### 6.4 Per-Row Deterministic State Machine
 For each row t:
 1. Read `entry_*` state from the prior row's committed `exit_*` state and evaluate whether a scheduled re-sync must be consumed at row t.
@@ -167,6 +173,13 @@ artifacts/phase2_temperature_sensors.csv must include:
 8. re-sync consumption, trigger, execution, and scheduling fields (for example event_resync_consumed_from_prior_row, event_resync_triggered_by_local_violation, event_resync_performed, exit_resync_scheduled_next_row).
 9. synchronization reason fields (for example local_constraint_violation, negative_delta_from_prior_row).
 10. communication event fields: trigger_message_count, request_message_count, response_message_count, broadcast_message_count, total_message_count.
+
+Implementation precedence rule for `event_resync_reason` when more than one cause is possible in the same row:
+1. `negative_delta_from_prior_row`
+2. `local_constraint_violation`
+3. `sensor_recovered_after_offline`
+
+This hierarchy preserves the strictest state-machine cause first while still recording offline recovery as a documented reason when it is the active cause in the row.
 
 ### 6.7 Phase 2 Implementation Artifact
 Required implementation artifact:

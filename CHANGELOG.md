@@ -4,6 +4,63 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-08-25
+
+### 1. Replaced exported local margin columns with per-sensor margin proximity scores
+- Summary:
+  - Updated the Phase 2 row export schema to remove exported `entry_{sensor}_local_margin` columns and add `event_{sensor}_margin_proximity_score` columns for each sensor.
+  - The new score is calculated as `entry_delta_global - event_{sensor}_local_deviation`, where positive values are acceptable and negative values indicate violation.
+  - Preserved the existing trigger/state-machine behavior (`local_deviation >= local_margin`) so this change is output-schema focused and does not alter core resync semantics.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/export_phase2_report_csvs.py
+  - scripts/export_phase2_to_excel.py
+  - scripts/validate_phase2_export_policy.py
+  - scripts/phase2_smoke_check.py
+  - scripts/README.md
+  - instructions/distributed_monitoring_notebook_required_changes.md
+  - artifacts/phase2_temperature_sensors.csv (regenerated)
+  - artifacts/phase2_temperature_metrics.json (regenerated)
+  - artifacts/phase2_data_dictionary.csv (regenerated)
+  - artifacts/phase2_sensor_reduction_analysis.csv (regenerated)
+  - artifacts/phase2_raw_row_results.csv (regenerated)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Removes duplicated margin information from exported outputs while preserving equivalent local-trigger observability through a single proximity score.
+  - Strengthens export and smoke validations so future regressions on this schema are caught automatically.
+
+## 2026-08-24
+
+### 1. Hid redundant internal resync booleans from exported Phase 2 output
+- Summary:
+  - Kept the internal `event_resync_consumed_from_prior_row` and `event_resync_triggered_by_local_violation` flags available to the calculation path, but removed them from the exported row schema so the public Phase 2 output only exposes the canonical `event_resync_reason` cause field.
+  - Left the state-machine timing, branching, and behavior unchanged while preserving all downstream metrics and communication totals.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/export_phase2_report_csvs.py
+  - scripts/export_phase2_to_excel.py
+  - scripts/README.md
+  - CHANGELOG.md
+- Behavior change:
+  - The exported Phase 2 row output no longer contains the duplicated resync booleans, while internal calculations still use them to preserve the original state-machine logic.
+
+## 2026-08-24
+
+### 1. Added recovery-aware resync handling for sensors returning after offline gaps
+- Summary:
+  - Updated the Phase 2 notebook state machine to detect sensors that were absent in the prior synchronized baseline and force a re-sync when they return with valid readings.
+  - Set the canonical reason precedence for `event_resync_reason` to:
+    - `negative_delta_from_prior_row`
+    - `local_constraint_violation`
+    - `sensor_recovered_after_offline`
+  - Kept the final export schema unchanged while documenting the recovery case through the existing resync reason field instead of creating a separate final-output column.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Prevents stale local reference and margin state from masking real offline-sensor recovery events.
+  - The algorithm now resets the baseline state when a sensor returns after an outage so the resumed sensor cannot remain falsely safe due to an outdated local reference.
+
 ## 2026-08-07
 
 ### 1. Reordered Phase 2 row output columns for resync state fields
