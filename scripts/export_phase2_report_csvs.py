@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -456,7 +455,13 @@ def _write_csv_atomic(df: pd.DataFrame, output_path: Path) -> None:
         if rounded_df[column].dtype.kind in "ifc":
             rounded_df[column] = rounded_df[column].round(4)
     rounded_df.to_csv(tmp_path, index=False)
-    tmp_path.replace(output_path)
+    try:
+        tmp_path.replace(output_path)
+    except PermissionError:
+        # Some Windows sync/indexing processes can temporarily lock the target.
+        rounded_df.to_csv(output_path, index=False)
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 def export_phase2_report_csvs(
@@ -464,7 +469,6 @@ def export_phase2_report_csvs(
     metrics_input: Path,
     data_dictionary_output: Path,
     analysis_output: Path,
-    raw_output: Path,
 ) -> dict[str, Path]:
     if not rows_input.exists():
         raise FileNotFoundError(f"Missing rows input CSV: {rows_input}")
@@ -481,15 +485,9 @@ def export_phase2_report_csvs(
     _write_csv_atomic(data_dictionary, data_dictionary_output)
     _write_csv_atomic(reduction_analysis, analysis_output)
 
-    raw_output.parent.mkdir(parents=True, exist_ok=True)
-    raw_tmp = raw_output.with_suffix(raw_output.suffix + ".tmp")
-    shutil.copyfile(rows_input, raw_tmp)
-    raw_tmp.replace(raw_output)
-
     return {
         "data_dictionary": data_dictionary_output,
         "sensor_reduction_analysis": analysis_output,
-        "raw_row_results": raw_output,
     }
 
 
@@ -497,7 +495,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Create CSV-first Phase 2 report outputs: data dictionary, "
-            "sensor reduction analysis, and raw row results copy."
+            "and sensor reduction analysis."
         )
     )
     parser.add_argument(
@@ -520,11 +518,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="artifacts/phase2_sensor_reduction_analysis.csv",
         help="Output CSV path for sensor reduction analysis.",
     )
-    parser.add_argument(
-        "--raw-output",
-        default="artifacts/phase2_raw_row_results.csv",
-        help="Output CSV path for raw row passthrough.",
-    )
     return parser.parse_args(argv)
 
 
@@ -536,7 +529,6 @@ def main(argv: list[str] | None = None) -> int:
         metrics_input=Path(args.metrics_input),
         data_dictionary_output=Path(args.data_dictionary_output),
         analysis_output=Path(args.analysis_output),
-        raw_output=Path(args.raw_output),
     )
 
     print("Wrote CSV report outputs:")

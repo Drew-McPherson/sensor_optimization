@@ -18,7 +18,6 @@ After generating Phase 2 outputs, you can build CSV-first report artifacts:
 2. Outputs are written to:
 3. [artifacts/phase2_data_dictionary.csv](artifacts/phase2_data_dictionary.csv)
 4. [artifacts/phase2_sensor_reduction_analysis.csv](artifacts/phase2_sensor_reduction_analysis.csv)
-5. [artifacts/phase2_raw_row_results.csv](artifacts/phase2_raw_row_results.csv)
 
 ## Instruction documents
 

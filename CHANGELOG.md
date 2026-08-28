@@ -6,6 +6,24 @@ This file tracks implemented changes in this repository.
 
 ## 2026-08-28
 
+### 2. Removed duplicate Phase 2 raw-row CSV export artifact
+- Summary:
+  - Removed generation of `artifacts/phase2_raw_row_results.csv` from the Phase 2 CSV report exporter so the report pipeline now emits only the data dictionary and reduction-analysis outputs.
+  - Removed the exporter CLI flag `--raw-output` and the corresponding return payload key.
+  - Added a Windows-safe fallback in CSV writing so temporary file rename lock conflicts can fall back to direct overwrite and continue successfully.
+  - Deleted stale local `artifacts/phase2_raw_row_results.csv` and `artifacts/phase2_raw_row_results.csv.tmp` artifacts from the active workspace.
+- Affected files:
+  - scripts/export_phase2_report_csvs.py
+  - scripts/README.md
+  - README.md
+  - artifacts/phase2_raw_row_results.csv (deleted)
+  - artifacts/phase2_raw_row_results.csv.tmp (deleted)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Removes a duplicate row-level output that provided no additional data beyond `artifacts/phase2_temperature_sensors.csv`.
+  - Reduces storage pressure and avoids unnecessary copy operations.
+  - Keeps the export contract simpler and more reliable on Windows-hosted workspaces.
+
 ### 1. Consolidated Phase 2 smoke and export-policy validation into notebook Stage 4
 - Summary:
   - Added a new Stage 4 validation section inside the Phase 2 notebook that runs smoke-style checks and export-policy checks as part of notebook execution.
