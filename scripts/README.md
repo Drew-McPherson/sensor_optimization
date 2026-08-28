@@ -95,6 +95,7 @@ For a source-only repository, these outputs are generated locally and may be abs
 9. If global margin after synchronization is negative, schedule re-sync for the next row.
 10. Use canonical boundary policy for aligned outputs: safe `<` boundary, violated `>=` boundary.
 11. Export per-row trace plus diagnostic metrics.
+12. Run integrated Stage 4 validation checks inside the notebook for smoke and export-policy invariants.
 
 ### Canonical Policies
 1. Global violation label in aligned output: `observed_global_average >= p90_threshold`.
@@ -218,3 +219,14 @@ Create CSV-first report artifacts for stakeholder inclusion and downstream packa
 
 ### Optional VS Code Task
 Use task label `phase2-export-csv-reports`.
+
+## Phase 2 Integrated Validation
+
+Validation is now embedded directly in `scripts/build_phase2_temperature_sensors.ipynb` as Stage 4.
+
+Stage 4 checks:
+1. Required Phase 1 and Phase 2 artifact presence.
+2. Required schema families and ordering in `phase2_temperature_sensors.csv`.
+3. 4-decimal numeric reporting policy checks.
+4. Required metrics policy keys.
+5. `phase2_sensor_reduction_analysis.csv` schema check when that report artifact is present.

@@ -23,6 +23,7 @@ For the active Phase 2 implementation in this repository, the following canonica
 4. per-sensor entry-state fields use `entry_{sensor}_reference_value` and `entry_{sensor}_local_margin`, and
 5. per-sensor event fields use `event_{sensor}_local_deviation` and `event_{sensor}_resync_requested` naming, and
 6. exported per-sensor reporting includes both `entry_{sensor}_local_margin` and `event_{sensor}_margin_proximity_score = entry_delta_global - event_{sensor}_local_deviation` (positive acceptable, negative violating).
+7. notebook execution includes an integrated post-export validation stage for smoke and export-policy invariants.
 
 This note documents the current canonical implementation choices while preserving the broader design discussion below.
 

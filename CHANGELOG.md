@@ -4,6 +4,26 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-08-28
+
+### 1. Consolidated Phase 2 smoke and export-policy validation into notebook Stage 4
+- Summary:
+  - Added a new Stage 4 validation section inside the Phase 2 notebook that runs smoke-style checks and export-policy checks as part of notebook execution.
+  - Retired standalone validation scripts by removing `scripts/phase2_smoke_check.py` and `scripts/validate_phase2_export_policy.py`.
+  - Updated VS Code task wiring and documentation so notebook execution is now the primary path for Phase 2 validation.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - .vscode/tasks.json
+  - scripts/README.md
+  - instructions/distributed_monitoring_notebook_required_changes.md
+  - scripts/phase2_smoke_check.py (deleted)
+  - scripts/validate_phase2_export_policy.py (deleted)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Reduces script sprawl and keeps Phase 2 build/validate behavior in one execution flow.
+  - Notebook runs now emit integrated validation output and fail in the same process when required invariants are violated.
+  - The reduction-analysis `bucket_epoch` check is performed when `artifacts/phase2_sensor_reduction_analysis.csv` is present; if absent, the notebook reports a skip for that artifact-specific check.
+
 ## 2026-08-25
 
 ### 2. Restored exported local margin fields while retaining proximity score fields

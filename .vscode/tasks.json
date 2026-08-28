@@ -28,18 +28,6 @@
 			}
 		},
 		{
-			"label": "phase2-smoke-check",
-			"type": "shell",
-			"command": "${command:python.interpreterPath}",
-			"args": [
-				"scripts/phase2_smoke_check.py"
-			],
-			"isBackground": false,
-			"options": {
-				"cwd": "${workspaceFolder}"
-			}
-		},
-		{
 			"label": "run-phase2-notebook",
 			"type": "shell",
 			"command": "${command:python.interpreterPath}",
@@ -112,29 +100,11 @@
 			}
 		},
 		{
-			"label": "phase2-validate-export-policy",
-			"type": "shell",
-			"command": "${command:python.interpreterPath}",
-			"args": [
-				"scripts/validate_phase2_export_policy.py"
-			],
-			"isBackground": false
-		},
-		{
 			"label": "phase2-export-csv-reports",
 			"type": "shell",
 			"command": "${command:python.interpreterPath}",
 			"args": [
 				"scripts/export_phase2_report_csvs.py"
-			],
-			"isBackground": false
-		},
-		{
-			"label": "phase2-validate-export-policy",
-			"type": "shell",
-			"command": "${command:python.interpreterPath}",
-			"args": [
-				"scripts/validate_phase2_export_policy.py"
 			],
 			"isBackground": false
 		},
