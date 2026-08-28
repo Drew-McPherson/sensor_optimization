@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import importlib.util
 import json
 from pathlib import Path
@@ -82,6 +83,31 @@ def _preflight(repo_root: Path, notebook_path: Path) -> None:
     if not notebook_path.exists():
         raise FileNotFoundError(f"Notebook not found: {notebook_path}")
 
+    aligned_required_columns = {"bucket_epoch", "bucket_time_utc", "average_temperature_all_devices"}
+    stats_required_columns = {"series_name", "p90"}
+
+    aligned_path = repo_root / "artifacts/aligned_phase1_temperature.csv"
+    stats_path = repo_root / "artifacts/phase1_average_statistics.csv"
+
+    with aligned_path.open("r", encoding="utf-8", newline="") as f:
+        aligned_columns = set(next(csv.reader(f), []))
+    with stats_path.open("r", encoding="utf-8", newline="") as f:
+        stats_columns = set(next(csv.reader(f), []))
+
+    missing_aligned = sorted(aligned_required_columns - aligned_columns)
+    missing_stats = sorted(stats_required_columns - stats_columns)
+
+    if missing_aligned:
+        raise ValueError(
+            "aligned_phase1_temperature.csv is missing required columns: "
+            + ", ".join(missing_aligned)
+        )
+    if missing_stats:
+        raise ValueError(
+            "phase1_average_statistics.csv is missing required columns: "
+            + ", ".join(missing_stats)
+        )
+
     data = json.loads(notebook_path.read_text(encoding="utf-8"))
     code_cells = [c for c in data.get("cells", []) if c.get("cell_type") == "code"]
     if not code_cells:
@@ -104,11 +130,27 @@ def _run_notebook_cells(repo_root: Path, notebook_path: Path) -> int:
             code = "".join(cell.get("source", []))
             if not code.strip():
                 continue
-            exec(
-                compile(code, f"<phase2-notebook-cell-{idx}>", "exec"),
-                namespace,
-                namespace,
-            )
+            try:
+                exec(
+                    compile(code, f"<phase2-notebook-cell-{idx}>", "exec"),
+                    namespace,
+                    namespace,
+                )
+            except Exception as exc:  # pragma: no cover - diagnostic path
+                first_line = ""
+                for line in code.splitlines():
+                    if line.strip():
+                        first_line = line.strip()
+                        break
+                raise RuntimeError(
+                    "Phase 2 notebook execution failed at code cell "
+                    + str(idx + 1)
+                    + (
+                        f" (starts with: {first_line[:120]})"
+                        if first_line
+                        else ""
+                    )
+                ) from exc
     finally:
         os.chdir(original_cwd)
 

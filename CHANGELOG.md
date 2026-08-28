@@ -6,6 +6,23 @@ This file tracks implemented changes in this repository.
 
 ## 2026-08-28
 
+### 4. Hardened notebook-centric Phase 2 export/validation pipeline
+- Summary:
+  - Added a hardening step in the notebook flow to re-apply the public row projection and regenerate report CSV artifacts from the public row schema before final validation.
+  - Strengthened Stage 4 validation with internal-column leak checks, dictionary duplication/coverage checks, and cross-artifact consistency checks against metrics communication totals and row/sensor counts.
+  - Improved notebook runner preflight by validating required input columns and improved runtime diagnostics with code-cell-index failure context.
+  - Removed import-cell clutter by centralizing `re` import in the main import cell.
+  - Preserved stakeholder-owned `artifacts/phase2_temperature_sensors.xlsx` unchanged.
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/run_phase2_notebook.py
+  - scripts/README.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Reduces schema drift risk by ensuring report outputs derive from the final public row artifact rather than internal state columns.
+  - Improves failure diagnosability and catches cross-artifact contract regressions within the integrated notebook validation path.
+  - Keeps monitoring behavior and metric semantics unchanged while increasing reliability.
+
 ### 3. Consolidated CSV report export into the Phase 2 notebook and retired standalone exporter scripts
 - Summary:
   - Merged CSV report generation logic into `scripts/build_phase2_temperature_sensors.ipynb` so a single notebook run now writes both report artifacts directly.

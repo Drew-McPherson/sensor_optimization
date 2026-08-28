@@ -123,7 +123,6 @@ For a source-only repository, these outputs are generated locally and may be abs
 	- `observed_global_average`
 	- `entry_xbar_t0`
 	- `entry_delta_global`
-	- `exit_delta_global`
 	- `exit_xbar_t0_if_resync`
 	- `exit_delta_global_if_resync`
 2. Per-sensor fields for each sensor (for example A-H):
@@ -218,3 +217,5 @@ Stage 4 checks:
 5. Required report artifacts exist (`phase2_data_dictionary.csv`, `phase2_sensor_reduction_analysis.csv`).
 6. `phase2_data_dictionary.csv` field coverage and schema checks.
 7. `phase2_sensor_reduction_analysis.csv` schema and minimum-metric checks.
+8. Cross-artifact consistency checks between exported rows and metrics totals.
+9. Public-schema enforcement that prevents internal control fields from appearing in exported row outputs.
