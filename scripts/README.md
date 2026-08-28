@@ -129,6 +129,7 @@ For a source-only repository, these outputs are generated locally and may be abs
 	- `observed_{sensor}_temperature`
 	- `entry_{sensor}_reference_value`
 	- `event_{sensor}_local_deviation`
+	- `entry_{sensor}_local_margin`
 	- `event_{sensor}_margin_proximity_score`
 	- `event_{sensor}_resync_requested`
 3. Re-sync control and reason fields:

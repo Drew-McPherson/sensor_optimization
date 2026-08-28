@@ -41,8 +41,8 @@ def main() -> None:
     print("phase2_local_margin_cols", len(local_margin_columns))
     print("phase2_margin_proximity_cols", len(margin_score_columns))
 
-    if local_margin_columns:
-        raise ValueError("Phase 2 output still includes entry_*_local_margin columns")
+    if not local_margin_columns:
+        raise ValueError("Phase 2 output is missing entry_*_local_margin columns")
     if not margin_score_columns:
         raise ValueError("Phase 2 output is missing event_*_margin_proximity_score columns")
 

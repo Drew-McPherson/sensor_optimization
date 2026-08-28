@@ -9,6 +9,9 @@
     "/^python scripts/run_phase2_notebook\\.py --preflight-only$/": {
       "approve": true,
       "matchCommandLine": true
-    }
+    },
+    "ConvertFrom-Json": true,
+    "ConvertTo-Json": true,
+    "Set-Content": true
   }
 }

@@ -233,6 +233,17 @@ def _describe_column(column: str, sensor_names: set[str]) -> dict[str, str]:
             "units": "temperature",
         }
 
+    sensor_margin = re.match(r"^entry_(.+)_local_margin$", column)
+    if sensor_margin:
+        sensor = sensor_margin.group(1)
+        return {
+            "field_name": column,
+            "category": "sensor_state",
+            "measures": f"Entry local trigger margin for sensor {sensor}.",
+            "calculation": f"p90_threshold_used - entry_{sensor}_reference_value.",
+            "units": "temperature",
+        }
+
     sensor_deviation = re.match(r"^event_(.+)_local_deviation$", column)
     if sensor_deviation:
         sensor = sensor_deviation.group(1)
@@ -262,7 +273,7 @@ def _describe_column(column: str, sensor_names: set[str]) -> dict[str, str]:
             "field_name": column,
             "category": "sensor_event",
             "measures": f"Whether sensor {sensor} requested re-sync on this row.",
-            "calculation": f"1 when event_{sensor}_margin_proximity_score <= 0 and row is not forced; else 0.",
+            "calculation": f"1 when event_{sensor}_local_deviation >= entry_{sensor}_local_margin and row is not forced; else 0.",
             "units": "binary (0/1)",
         }
 

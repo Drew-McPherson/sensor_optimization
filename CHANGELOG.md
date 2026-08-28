@@ -6,6 +6,26 @@ This file tracks implemented changes in this repository.
 
 ## 2026-08-25
 
+### 2. Restored exported local margin fields while retaining proximity score fields
+- Summary:
+  - Restored exported `entry_{sensor}_local_margin` columns in the Phase 2 row output.
+  - Kept `event_{sensor}_margin_proximity_score` columns so both threshold state and proximity state are available in outputs.
+  - Kept trigger/state-machine semantics unchanged (`event_{sensor}_local_deviation >= entry_{sensor}_local_margin`).
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/export_phase2_report_csvs.py
+  - scripts/export_phase2_to_excel.py
+  - scripts/validate_phase2_export_policy.py
+  - scripts/phase2_smoke_check.py
+  - scripts/README.md
+  - instructions/distributed_monitoring_notebook_required_changes.md
+  - artifacts/phase2_temperature_sensors.csv (regenerated)
+  - artifacts/phase2_temperature_metrics.json (regenerated)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Restores explicit local-threshold visibility needed for auditability and compatibility with prior schema consumers.
+  - Preserves proximity score reporting for distance-to-constraint analysis without changing trigger behavior.
+
 ### 1. Replaced exported local margin columns with per-sensor margin proximity scores
 - Summary:
   - Updated the Phase 2 row export schema to remove exported `entry_{sensor}_local_margin` columns and add `event_{sensor}_margin_proximity_score` columns for each sensor.

@@ -22,7 +22,7 @@ For the active Phase 2 implementation in this repository, the following canonica
 3. the preferred row-level timing columns are `entry_xbar_t0`, `entry_delta_global`, `observed_global_average`, and `exit_delta_global`,
 4. per-sensor entry-state fields use `entry_{sensor}_reference_value` and `entry_{sensor}_local_margin`, and
 5. per-sensor event fields use `event_{sensor}_local_deviation` and `event_{sensor}_resync_requested` naming, and
-6. exported per-sensor proximity reporting uses `event_{sensor}_margin_proximity_score = entry_delta_global - event_{sensor}_local_deviation` (positive acceptable, negative violating).
+6. exported per-sensor reporting includes both `entry_{sensor}_local_margin` and `event_{sensor}_margin_proximity_score = entry_delta_global - event_{sensor}_local_deviation` (positive acceptable, negative violating).
 
 This note documents the current canonical implementation choices while preserving the broader design discussion below.
 
