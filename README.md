@@ -12,9 +12,9 @@ This repository contains the temperature sensor transformation and monitoring wo
 
 ## Reporting output
 
-After generating Phase 2 outputs, you can build CSV-first report artifacts:
+CSV-first report artifacts are generated directly by the Phase 2 notebook run:
 
-1. Run [scripts/export_phase2_report_csvs.py](scripts/export_phase2_report_csvs.py).
+1. Run [scripts/run_phase2_notebook.py](scripts/run_phase2_notebook.py).
 2. Outputs are written to:
 3. [artifacts/phase2_data_dictionary.csv](artifacts/phase2_data_dictionary.csv)
 4. [artifacts/phase2_sensor_reduction_analysis.csv](artifacts/phase2_sensor_reduction_analysis.csv)

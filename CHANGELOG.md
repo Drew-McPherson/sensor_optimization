@@ -6,6 +6,26 @@ This file tracks implemented changes in this repository.
 
 ## 2026-08-28
 
+### 3. Consolidated CSV report export into the Phase 2 notebook and retired standalone exporter scripts
+- Summary:
+  - Merged CSV report generation logic into `scripts/build_phase2_temperature_sensors.ipynb` so a single notebook run now writes both report artifacts directly.
+  - Removed standalone exporter scripts `scripts/export_phase2_report_csvs.py` and `scripts/export_phase2_to_excel.py` from active workflow.
+  - Tightened notebook-integrated validation to require `phase2_data_dictionary.csv` and `phase2_sensor_reduction_analysis.csv` and validate their schema/coverage invariants.
+  - Updated task and documentation references to remove separate report-export execution.
+  - Explicitly preserved `artifacts/phase2_temperature_sensors.xlsx` as a stakeholder-owned analysis file (not generated/overwritten by this migration).
+- Affected files:
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - .vscode/tasks.json
+  - scripts/README.md
+  - README.md
+  - scripts/export_phase2_report_csvs.py (deleted)
+  - scripts/export_phase2_to_excel.py (deleted)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Reduces drift risk by keeping report generation and validation in the same execution path as Phase 2 artifact generation.
+  - Removes duplicate exporter maintenance surfaces and simplifies operation to one canonical command path (`scripts/run_phase2_notebook.py`).
+  - Preserves stakeholder-managed Excel analysis output while avoiding pipeline coupling to Excel tooling.
+
 ### 2. Removed duplicate Phase 2 raw-row CSV export artifact
 - Summary:
   - Removed generation of `artifacts/phase2_raw_row_results.csv` from the Phase 2 CSV report exporter so the report pipeline now emits only the data dictionary and reduction-analysis outputs.
