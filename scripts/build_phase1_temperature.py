@@ -333,12 +333,10 @@ def build_phase1_temperature(
     Design notes:
     - We keep full trace counters for auditability.
     - Deduplication is performed for temperature stream keys used in Phase 1.
-    - Alignment uses bucketed timeline and bounded forward-fill.
-        - Per-bucket average columns are emitted from final per-device row values:
-            one includes imputed values, one excludes imputed values.
+    - Alignment is observed-only: missing device values remain blank and act as a
+      coverage penalty instead of being filled or inferred.
     """
 
-    # Track file-level audit and global counters.
     raw_index_rows: List[Dict[str, Any]] = []
     counters = {
         "files_processed": 0,
@@ -351,14 +349,8 @@ def build_phase1_temperature(
         "rows_temperature_duplicate": 0,
     }
 
-    # Temperature data keyed by (bucket_epoch, device_id): list of raw values.
-    # We store list to support median aggregation exactly as specified.
     values_by_bucket_device: Dict[Tuple[int, str], List[float]] = defaultdict(list)
-
-    # Keep seen temperature keys for deterministic de-duplication in Phase 1.
-    # Key is (time_epoch, device, sensor).
     seen_temp_keys: set[Tuple[int, str, str]] = set()
-
     device_ids_seen: set[str] = set()
 
     for file_path in files:
@@ -373,13 +365,11 @@ def build_phase1_temperature(
         with file_path.open("r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
 
-            # Basic schema check at reader level.
             expected = {"Time", "DeviceId", "Sensor", "Value"}
             fieldnames = set(reader.fieldnames or [])
             schema_ok = expected.issubset(fieldnames)
 
             if not schema_ok:
-                # Entire file is counted but invalid for transformation.
                 for _ in reader:
                     row_count += 1
                     schema_invalid += 1
@@ -413,7 +403,6 @@ def build_phase1_temperature(
                 ts_epoch = _safe_int_epoch(t)
                 val = _safe_float(v)
 
-                # Row-level schema validity includes parseability of critical fields.
                 if ts_epoch is None or not d or not s or val is None:
                     schema_invalid += 1
                     counters["rows_schema_invalid"] += 1
@@ -456,24 +445,16 @@ def build_phase1_temperature(
             }
         )
 
-    # Build aggregated per (bucket, device) temperature value.
     agg_value_by_bucket_device: Dict[Tuple[int, str], float] = {}
     for key, vals in values_by_bucket_device.items():
-        # Use median for robustness to spikes, as specified in plan/config.
         agg_value_by_bucket_device[key] = float(statistics.median(vals))
 
     buckets_sorted = sorted({b for (b, _) in agg_value_by_bucket_device.keys()})
     devices_sorted = sorted(device_ids_seen)
 
-    # Align series by bucket across devices with bounded carry-forward.
-    # For each device, track last observed value and age in buckets.
     aligned_rows: List[Dict[str, Any]] = []
-    imputed_cell_count = 0
     total_cell_count = 0
-    stale_cell_count = 0
-
-    # last_real[(device)] = (bucket_epoch, value)
-    last_real: Dict[str, Tuple[int, float]] = {}
+    stale_snapshot_count = 0
 
     for bucket in buckets_sorted:
         row: Dict[str, Any] = {
@@ -482,72 +463,29 @@ def build_phase1_temperature(
         }
 
         available_devices = 0
-        non_imputed_fields = 0
-        imputed_fields = 0
         max_age_seconds = 0
         avg_candidates_all_devices: List[float] = []
-        avg_candidates_non_imputed: List[float] = []
 
         for device in devices_sorted:
             total_cell_count += 1
-
             direct_key = (bucket, device)
             value: Optional[float] = None
-            imputed = False
-            age_seconds = 0
 
             if direct_key in agg_value_by_bucket_device:
-                # Fresh measurement for this bucket/device.
                 value = agg_value_by_bucket_device[direct_key]
-                last_real[device] = (bucket, value)
-            else:
-                # Attempt bounded carry-forward from latest real observation.
-                if device in last_real:
-                    last_bucket, last_value = last_real[device]
-                    gap_buckets = (bucket - last_bucket) // bucket_size_seconds
-                    if gap_buckets <= max_forward_fill_buckets:
-                        value = last_value
-                        imputed = True
-                        age_seconds = int(gap_buckets * bucket_size_seconds)
 
-            # Optional stale-drop behavior.
-            if (
-                value is not None
-                and drop_snapshot_if_stale_over_threshold
-                and age_seconds > stale_threshold_seconds
-            ):
-                stale_cell_count += 1
-                value = None
-                imputed = False
-                age_seconds = 0
-
-            # Record per-device fields to keep reviewability explicit.
             row[f"{device}_temperature"] = "" if value is None else round(value, 6)
-            row[f"{device}_is_imputed"] = int(imputed) if value is not None else ""
-            row[f"{device}_age_seconds"] = age_seconds if value is not None else ""
 
             if value is not None:
                 avg_candidates_all_devices.append(value)
                 available_devices += 1
-                max_age_seconds = max(max_age_seconds, age_seconds)
-                if imputed:
-                    imputed_fields += 1
-                    imputed_cell_count += 1
-                else:
-                    avg_candidates_non_imputed.append(value)
-                    non_imputed_fields += 1
 
-        # Calculate snapshot confidence from plan formula.
         total_fields = len(devices_sorted) if devices_sorted else 1
-        completeness_component = non_imputed_fields / total_fields
+        completeness_component = (available_devices / total_fields) if total_fields else 0.0
         freshness_component = 1.0 - min(1.0, max_age_seconds / max(1, stale_threshold_seconds))
-        confidence = (
-            completeness_weight * completeness_component
-            + freshness_weight * freshness_component
-        )
+        confidence = completeness_weight * completeness_component + freshness_weight * freshness_component
 
         row["available_devices"] = available_devices
-        row["imputed_fields"] = imputed_fields
         row["max_age_seconds"] = max_age_seconds
         row["snapshot_confidence"] = round(confidence, 6)
         row["meets_min_device_coverage"] = int(available_devices >= min_devices_per_snapshot)
@@ -557,31 +495,17 @@ def build_phase1_temperature(
             else round(sum(avg_candidates_all_devices) / len(avg_candidates_all_devices), 6)
         )
         row["average_temperature_all_devices_count"] = len(avg_candidates_all_devices)
-        row["average_temperature_non_imputed_devices"] = (
-            ""
-            if not avg_candidates_non_imputed
-            else round(sum(avg_candidates_non_imputed) / len(avg_candidates_non_imputed), 6)
-        )
+
+        if available_devices < min_devices_per_snapshot:
+            stale_snapshot_count += 1
 
         aligned_rows.append(row)
 
-    # Summarize QC metrics for quality-gate checks and reporting.
-    schema_validity_percent = (
-        100.0 * counters["rows_schema_valid"] / max(1, counters["rows_total"])
-    )
-    duplicate_key_rate_percent = (
-        100.0 * counters["rows_temperature_duplicate"] / max(1, counters["rows_temperature"])
-    )
-    imputation_rate_percent = (
-        100.0 * imputed_cell_count / max(1, total_cell_count)
-    )
-    stale_snapshot_rate_percent = (
-        100.0 * stale_cell_count / max(1, total_cell_count)
-    )
+    schema_validity_percent = 100.0 * counters["rows_schema_valid"] / max(1, counters["rows_total"])
+    duplicate_key_rate_percent = 100.0 * counters["rows_temperature_duplicate"] / max(1, counters["rows_temperature"])
+    stale_snapshot_rate_percent = 100.0 * stale_snapshot_count / max(1, len(aligned_rows))
     coverage_ok_count = sum(1 for r in aligned_rows if r["meets_min_device_coverage"] == 1)
-    device_coverage_percent = (
-        100.0 * coverage_ok_count / max(1, len(aligned_rows))
-    )
+    device_coverage_percent = 100.0 * coverage_ok_count / max(1, len(aligned_rows))
 
     qc = {
         **counters,
@@ -589,7 +513,6 @@ def build_phase1_temperature(
         "snapshot_count": len(aligned_rows),
         "schema_validity_percent": round(schema_validity_percent, 6),
         "duplicate_key_rate_percent": round(duplicate_key_rate_percent, 6),
-        "imputation_rate_percent": round(imputation_rate_percent, 6),
         "stale_snapshot_rate_percent": round(stale_snapshot_rate_percent, 6),
         "device_coverage_percent": round(device_coverage_percent, 6),
     }
@@ -607,7 +530,6 @@ def write_csv_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if not rows:
-        # Write an empty file with no header if no rows exist.
         path.write_text("", encoding="utf-8")
         return
 
@@ -629,8 +551,8 @@ def build_phase1_average_statistics_rows(
     percentiles: List[int],
 ) -> List[Dict[str, Any]]:
     """
-    Build summary statistics for phase1 average columns using only rows with
-    snapshot_confidence greater than the configured threshold.
+    Build summary statistics for the observed-only Phase 1 average column using only
+    rows with snapshot_confidence greater than the configured threshold.
     """
     filtered_rows = [
         r
@@ -640,11 +562,7 @@ def build_phase1_average_statistics_rows(
     ]
 
     percentile_fields = [f"p{p:02d}" for p in percentiles]
-
-    series_specs = [
-        ("average_temperature_all_devices", "all_devices_including_imputed"),
-        ("average_temperature_non_imputed_devices", "non_imputed_devices_only"),
-    ]
+    series_specs = [("average_temperature_all_devices", "all_devices_observed")]
 
     rows: List[Dict[str, Any]] = []
     confidence_label = f"snapshot_confidence_gt_{confidence_threshold:.2f}"
@@ -678,35 +596,6 @@ def build_phase1_average_statistics_rows(
 
         rows.append(out)
 
-    # Add a diagnostic delta series to quantify imputation impact.
-    delta_values: List[float] = []
-    for r in filtered_rows:
-        all_val = _safe_numeric(r.get("average_temperature_all_devices"))
-        non_imp_val = _safe_numeric(r.get("average_temperature_non_imputed_devices"))
-        if all_val is not None and non_imp_val is not None:
-            delta_values.append(all_val - non_imp_val)
-
-    delta_row: Dict[str, Any] = {
-        "series_name": "imputation_delta_all_minus_non_imputed",
-        "source_column": "average_temperature_all_devices - average_temperature_non_imputed_devices",
-        "confidence_filter": confidence_label,
-        "filtered_snapshot_count": len(filtered_rows),
-        "non_null_value_count": len(delta_values),
-        "mean": "",
-        "std_dev": "",
-    }
-    for f in percentile_fields:
-        delta_row[f] = ""
-
-    if delta_values:
-        delta_sorted = sorted(delta_values)
-        delta_row["mean"] = round(statistics.mean(delta_sorted), 6)
-        delta_row["std_dev"] = round(statistics.stdev(delta_sorted), 6) if len(delta_sorted) > 1 else 0.0
-        for p in percentiles:
-            pv = _percentile_linear(delta_sorted, p)
-            delta_row[f"p{p:02d}"] = "" if pv is None else round(pv, 6)
-
-    rows.append(delta_row)
     return rows
 
 
@@ -729,13 +618,6 @@ def evaluate_quality_gates(qc: Dict[str, Any], gates: Dict[str, Any]) -> Tuple[b
             "operator": "<=",
             "actual": float(qc["duplicate_key_rate_percent"]),
             "threshold": float(gates["duplicate_key_rate_max_percent"]),
-        },
-        {
-            "gate": "imputation_rate_max_percent",
-            "metric": "imputation_rate_percent",
-            "operator": "<=",
-            "actual": float(qc["imputation_rate_percent"]),
-            "threshold": float(gates["imputation_rate_max_percent"]),
         },
         {
             "gate": "stale_snapshot_rate_max_percent",
@@ -785,7 +667,6 @@ def append_decisions_log(
     lines.append("")
     lines.append("### Locked Defaults Used")
     lines.append(f"- bucket_size_seconds: {run_meta['bucket_size_seconds']}")
-    lines.append(f"- max_forward_fill_buckets: {run_meta['max_forward_fill_buckets']}")
     lines.append(f"- min_devices_per_snapshot: {run_meta['min_devices_per_snapshot']}")
     lines.append(f"- stale_threshold_seconds: {run_meta['stale_threshold_seconds']}")
     lines.append("")
@@ -798,7 +679,6 @@ def append_decisions_log(
     lines.append("### QC Snapshot")
     lines.append(f"- schema_validity_percent: {qc['schema_validity_percent']}")
     lines.append(f"- duplicate_key_rate_percent: {qc['duplicate_key_rate_percent']}")
-    lines.append(f"- imputation_rate_percent: {qc['imputation_rate_percent']}")
     lines.append(f"- stale_snapshot_rate_percent: {qc['stale_snapshot_rate_percent']}")
     lines.append(f"- device_coverage_percent: {qc['device_coverage_percent']}")
 
@@ -863,10 +743,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     raw_index_rows, aligned_rows, qc = build_phase1_temperature(
         files=files,
         bucket_size_seconds=int(global_cfg["bucket_size_seconds"]),
-        max_forward_fill_buckets=int(global_cfg["max_forward_fill_buckets"]),
+        max_forward_fill_buckets=int(global_cfg.get("max_forward_fill_buckets", 0)),
         stale_threshold_seconds=int(phase1_cfg["stale_threshold_seconds"]),
         min_devices_per_snapshot=int(global_cfg["min_devices_per_snapshot"]),
-        drop_snapshot_if_stale_over_threshold=bool(global_cfg["drop_snapshot_if_stale_over_threshold"]),
+        drop_snapshot_if_stale_over_threshold=bool(global_cfg.get("drop_snapshot_if_stale_over_threshold", True)),
         completeness_weight=float(conf_cfg["completeness_weight"]),
         freshness_weight=float(conf_cfg["freshness_weight"]),
     )
@@ -899,13 +779,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         "config_path": str(config_path),
         "data_dir": str(data_dir),
         "bucket_size_seconds": global_cfg["bucket_size_seconds"],
-        "max_forward_fill_buckets": global_cfg["max_forward_fill_buckets"],
         "min_devices_per_snapshot": global_cfg["min_devices_per_snapshot"],
         "stale_threshold_seconds": phase1_cfg["stale_threshold_seconds"],
     }
     append_decisions_log(decisions_path, run_meta, gate_checks, qc)
 
-    # Emit machine-readable run summary for easy CI / agent parsing.
     summary = {
         "artifacts": {
             "raw_index": str(raw_index_path),

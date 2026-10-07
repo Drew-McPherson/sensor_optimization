@@ -4,6 +4,146 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-10-07
+
+### 1. Archived the replay validation notebook from the active source tree
+- Summary:
+  - Moved `scripts/phase2_replay_validation.ipynb` into `Archive/phase2_replay_validation.ipynb` so it is not part of the active repository workflow.
+  - Kept the notebook in the archive directory because the repo ignores `Archive/` content and treats it as local, non-source material.
+- Affected files:
+  - Archive/phase2_replay_validation.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - The core Phase 2 pipeline continues to run through `scripts/run_phase2_notebook.py` and `scripts/build_phase2_temperature_sensors.ipynb`.
+  - The archived notebook remains available for historical replay/QA reference without polluting the active source tree or Git-tracked content.
+
+
+## 2026-09-22
+
+### 3. Added one-second guides to device reporting plot
+- Summary:
+  - Added higher-contrast vertical guide lines every 10 seconds in the first-five-minute temperature reporting scatterplot.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes the timing and stagger between device reports easier to inspect while keeping square report blocks visible above the guides.
+
+### 4. Added 30-second device reporting block chart
+- Summary:
+  - Added a binary reporting chart with one column per 30-second interval and one row per device.
+  - Filled blocks indicate at least one temperature report in the interval; outlined light blocks indicate no observed report.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Provides a compact interval-level view of device reporting continuity alongside the second-level scatterplot.
+
+### 5. Added all-data device sample-count bar chart
+- Summary:
+  - Added a bar chart counting all temperature samples reported by each `DeviceId` across `temperature_raw`.
+  - Sorted devices from the highest to the lowest sample count.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Provides an overall device representation comparison independent of the five-minute reporting visualizations.
+
+### 6. Added full-period device temperature line chart
+- Summary:
+  - Added a line chart plotting every temperature sample over time for all eight devices in `temperature_raw`.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Enables comparison of device temperature trajectories, spikes, and longer-term changes without aggregation or smoothing.
+
+### 7. Added per-device temperature summary table
+- Summary:
+  - Added a table containing the mean, median, standard deviation, first quartile, and third quartile for each device's temperature readings.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Provides a compact statistical comparison of the temperature distributions across all devices.
+
+### 8. Rounded device temperature summary statistics
+- Summary:
+  - Rounded the mean, median, standard deviation, first quartile, and third quartile columns in the device temperature summary table to two decimal places.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Improves table readability while leaving the underlying raw temperature data unchanged.
+
+### 2. Improved device reporting plot readability
+- Summary:
+  - Tightened the device-row spacing in the first-five-minute temperature reporting plot.
+  - Replaced circular points with compact square blocks for each unique device-second report.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes staggered reporting times and gaps between device events easier to see without changing the underlying report selection.
+
+### 1. Updated temperature reporting plot window and dataframe name
+- Summary:
+  - Renamed the notebook's working temperature dataframe to `temperature_raw`.
+  - Changed the device reporting scatterplot from the first hour to the first five minutes of observed temperature data.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Aligns the notebook variable name with the saved temperature-only dataset and makes short-interval reporting patterns easier to inspect.
+
+## 2026-09-21
+
+### 4. Added device reporting scatterplot for the first temperature hour
+- Summary:
+  - Updated `scripts/phase_1_raw_data_summary.ipynb` to expose the temperature-only dataframe as `temperatures_raw` consistently for both fresh builds and saved-file reuse.
+  - Added a first-hour scatterplot with `DeviceId` on the y-axis, UTC time on the x-axis, and one dot per unique device-second report.
+- Affected files:
+  - scripts/phase_1_raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes device-level reporting continuity visible without duplicating multiple rows from the same device and second.
+  - The plot uses the earliest observed temperature timestamp as the start of the one-hour window.
+
+### 3. Replaced long-format missingness summaries with representation-share diagnostics
+- Summary:
+  - Updated `scripts/raw_data_summary.ipynb` to measure each sensor's and device's share of total long-format records instead of treating null `Value` fields as record missingness.
+  - Removed value-completeness inputs from the credibility calculation and revised the assessment wording to describe a variability-based score.
+- Affected files:
+  - scripts/raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - In long-format telemetry, absent observations are absent rows, so row representation is the appropriate first diagnostic for over- or under-representation.
+  - The notebook no longer presents value-null percentages as evidence of temporal completeness; expected-grid coverage remains a separate future analysis.
+
+### 2. Added continuation notebook for replay validation, profiling, drift monitoring, and release gates
+- Summary:
+  - Added a staged continuation notebook at `scripts/phase2_replay_validation.ipynb` covering deterministic test fixtures, scenario replay, regression assertions, performance profiling, daily drift monitoring, and release-gate artifact diff checks.
+  - The notebook is structured as Stage 5 through Stage 10 and is intended to run from the repository root as a self-contained validation and QA companion to the Phase 2 monitoring flow.
+  - The fixture/replay section is designed to exercise offline recovery, local trigger cases, forced resyncs, and negative-delta scheduling without requiring large production-like input files.
+- Affected files:
+  - scripts/phase2_replay_validation.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Extends the deterministic monitoring pipeline beyond the core Phase 2 output generation into reusable regression, scale, drift, and release validation workflows.
+  - Gives maintainers a reproducible QA path for CI checks, daily comparison, and artifact stability reviews without duplicating production logic.
+
+### 1. Added raw-data summary notebook for dataset quality and sensor diagnostics
+- Summary:
+  - Added a new notebook at `scripts/raw_data_summary.ipynb` that reads all raw sensor CSVs from `Data/files_csv`, normalizes the schema, and generates a minimum useful summary set for dataset quality and sensor diagnostics.
+  - The notebook writes CSV artifacts under `artifacts/` covering dataset overview, per-sensor summary statistics, per-device summaries, missingness, gap analysis, and basic quality flags.
+  - The output package is designed to be CSV-first for easy downstream review and to support Phase 1/Phase 2 analysis decisions without adding modeling logic.
+- Affected files:
+  - scripts/raw_data_summary.ipynb
+  - CHANGELOG.md
+- Rationale and impact:
+  - Establishes a reusable raw-data quality preflight before downstream monitoring or transformation work.
+  - Gives project reviewers a compact, auditable view of time coverage, device coverage, value ranges, missingness, and obvious quality issues.
+
 ## 2026-08-28
 
 ### 4. Hardened notebook-centric Phase 2 export/validation pipeline

@@ -6,7 +6,6 @@ global:
   bucket_size_seconds: 60
   join_tolerance_seconds: 30
   intra_bucket_aggregation: median
-  max_forward_fill_buckets: 2
   min_devices_per_snapshot: 6
   drop_snapshot_if_stale_over_threshold: true
 
@@ -36,7 +35,6 @@ phase2:
 quality_gates:
   schema_validity_min_percent: 100
   duplicate_key_rate_max_percent: 0.5
-  imputation_rate_max_percent: 20
   stale_snapshot_rate_max_percent: 10
   device_coverage_min_percent: 90
 
