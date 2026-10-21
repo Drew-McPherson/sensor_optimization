@@ -11,7 +11,7 @@ This document has two layers:
 Primary project sequence:
 1. Phase 1 transformation creates aligned temperature snapshots.
 2. Phase 2 deterministic monitoring consumes those snapshots and emits sensor-level re-sync decisions.
-3. Phase 3 validates FMIC/SMIC clustering on the temperature streams after Phase 2 is validated, first under a fixed-membership condition and then under an explicitly separated dynamic-membership policy.
+3. Phase 3 validates FMIC/SMIC clustering after Phase 2 under Approach A: a fixed selected cohort with synchronization on every change in observed contributors, matched across all three algorithms.
 4. Multivariate extension is deferred until the temperature-only clustering experiment is validated and interpreted.
 
 ---
@@ -49,18 +49,18 @@ Precedence rule for this repository:
 17. Phase 3 must implement and validate FMIC and SMIC separately before any combined comparison is reported.
 18. Alpha is a clustering design/tuning parameter, not an established optimum for this dataset. alpha=0.10 may be retained only as a named baseline setting.
 19. Required Phase 3 alpha sensitivity sweep is 0.05, 0.10, ..., 0.95. The full sensitivity results must be retained; the best-performing value may be identified after the sweep rather than treated as prespecified.
-20. Phase 3 must separate the effect of clustering from the effect of sensor membership synchronization. Fixed-membership and dynamic-membership results must be reported separately.
+20. Phase 3 compares algorithms under the same Approach A availability policy and reports synchronization causes separately. It does not claim an availability-free clustering effect or require duplicate fixed/dynamic experiments.
 21. No sensor-value imputation is permitted in any project phase. Missing/stale readings remain missing, never zero or a carried-forward temperature. Comparisons against Phase 2 or centralized baselines must use consistent observed-only availability and denominator policies.
 22. Cluster construction must follow the source methodology for history vectors, normalization, partition quality, greedy merge procedure, and FMIC/SMIC allowance weights unless an adaptation is explicitly labeled and justified.
 23. History updates must use signed change relative to the active synchronization reference, not change relative to the immediately prior minute.
-24. Missing/offline readings must never be silently converted to zero change. Returning sensors must re-enter through the explicit membership/synchronization policy before their history resumes in the dynamic-membership variant.
+24. Missing/offline readings must never be silently converted to zero change. Returning sensors must complete re-entry synchronization before their history resumes.
 25. Signed cancellation inside a cluster may suppress unnecessary root escalation only when the monitored global condition remains correct. Local sensor violations must still be detected and logged.
 26. Phase 3 communication accounting must separate routine monitoring, cluster collection/checks, root escalation, synchronization, membership change, coordinator reassignment, and total messages.
 27. Clustering occurs at initial synchronization and every later completed resynchronization, never on a timer. The resulting partition, coordinators, references, and allowances apply starting on the next row.
 28. Accumulated history is retained and discounted across resynchronizations, not reset after clustering; subsequent valid updates use the newly synchronized reference.
 29. Each cluster's coordinator is its highest-ID available member, using documented deterministic sensor-ID ordering.
 30. Cluster/coordinator information is included with normal synchronization threshold updates. It creates no additional standalone formation/reassignment transmissions; message types and synchronization causes must not double-count bundled traffic.
-31. Fixed membership keeps the cohort constant while averaging its currently observed readings. Dynamic departure occurs on the first missing bucket after Phase 1 freshness filtering; departure/return triggers synchronization and reclustering on completion.
+31. Approach A keeps the selected cohort constant while averaging its currently observed readings. Departure occurs on the first missing bucket after Phase 1 freshness filtering; return occurs on the first valid reading. Every departure/return triggers synchronization in Phase 2/FMIC/SMIC and reclustering on completion in Phase 3.
 32. No minimum active-sensor count is imposed. Zero valid readings imply undefined global mean and threshold decision; observation-dependent synchronization cannot complete until valid readings are available.
 33. Online/offline status is known without communication. Send synchronization requests and threshold updates only to currently online sensors, count only their responses, and generate zero offline-sensor traffic. Startup synchronization is included in totals.
 
@@ -110,12 +110,12 @@ Objective: determine whether source-aligned clustering further reduces communica
 
 Required sequence:
 1. Validate Phase 2 behavior with targeted synthetic and row-level tests.
-2. Implement FMIC with fixed membership and validate it independently.
+2. Implement FMIC under Approach A and validate it independently.
 3. Run FMIC alpha sensitivity.
-4. Implement SMIC with fixed membership and validate it independently.
+4. Implement SMIC under Approach A and validate it independently.
 5. Run SMIC alpha sensitivity.
-6. Add the dynamic-membership synchronization policy as a separate experimental factor.
-7. Compare fixed-membership and dynamic-membership variants without mixing their communication totals.
+6. Validate observed-contributor departure/return handling under the same policy in all three algorithms.
+7. Report algorithm differences and availability-related cause attribution without inventing duplicate fixed/dynamic run modes.
 8. Only after these steps, produce the full Phase 2 vs FMIC vs SMIC comparison.
 
 Interpretation rule: the initial Phase 3 experiment remains temperature-only. Multivariate monitoring is deferred so that clustering effects are not confounded with a simultaneous change in dimensionality.
@@ -176,7 +176,7 @@ Required columns in aligned Phase 1 input:
 For each row t:
 1. Read prior committed state into `entry_*`; determine current online sensors, departures, and returns from valid observations after Phase 1 freshness filtering.
 2. Add membership changes and initialization to pending synchronization causes. A departure is the first missing bucket and a return is the first subsequent valid bucket.
-3. If any forced cause is present, skip local evaluation and keep trigger bits/messages zero. Complete synchronization only if at least one sensor is online; otherwise retain pending causes without traffic.
+3. If any forced cause is present, suppress operational local triggers and keep trigger bits/messages zero, but calculate local deviations and constraint comparisons against valid entry references for reporting. Complete synchronization only if at least one sensor is online; otherwise retain pending causes without traffic.
 4. Without forced causes, compute online sensors' deviations from entry references and trigger when `deviation >= margin`. Any triggering sensors produce their trigger messages and one synchronization.
 5. At synchronization, set the exit global reference to the current observed mean, set online references/margins from current observations, and invalidate references/margins for excluded sensors.
 6. Count request/response/update fanout using the online count, not the configured cohort size. All membership status detection is free.
@@ -191,6 +191,9 @@ For each exported row:
 3. `event_*` fields record outcomes produced during the current minute.
 4. `exit_*` fields describe the state committed at the end of the row and carried into the next row.
 5. `transition_summary` is an early-row audit field summarizing the row's event and exit-state transitions.
+6. `distributed_constraint_state` is `VIOLATING` if any observed sensor meets/exceeds its entry local allowance, including reporting-only comparisons on forced rows. `FEASIBLE` requires complete comparison coverage with no violation; incomplete coverage is `NOT_EVALUABLE`, and no observations is `UNDEFINED`.
+7. `centralized_constraint_state` remains the observed global p90 oracle; `event_resync_performed` records the independent operational synchronization action. The redundant `distributed_alert` alias is removed.
+8. The existing module independently replays reference state from unrounded inputs to validate the full trace before rounding and after CSV export. Exact boundary decisions use original inputs; numeric CSV comparisons use four-decimal tolerance. Violations identify the bucket and field.
 
 ### 6.6 Required Phase 2 Output Schema
 artifacts/phase2_temperature_sensors.csv must include:
@@ -206,6 +209,7 @@ artifacts/phase2_temperature_sensors.csv must include:
 10. communication event fields: trigger_message_count, request_message_count, response_message_count, broadcast_message_count, total_message_count.
 11. membership/evaluability fields: observed_online_sensor_names, observed_online_sensor_count, event_departing_sensor_names, event_returning_sensor_names, event_membership_changed, global_state_evaluable.
 12. cause-attribution fields: membership_resync_message_count and initialization_message_count. These may overlap and must not be added to transmission-type totals.
+13. constraint/diagnostic fields: centralized_constraint_state, distributed_constraint_state, global_violation, false_safe, false_alert, violation_detection_delay_buckets. `distributed_alert` is not exported.
 
 Implementation precedence rule for `event_resync_reason` when more than one cause is possible in the same row:
 1. `negative_delta_from_prior_row`
@@ -221,7 +225,7 @@ Required implementation artifact:
 2. scripts/phase2_monitoring.py, the state machine used by the notebook and synthetic tests.
 3. scripts/test_phase2_monitoring.py, run with `python -m unittest scripts.test_phase2_monitoring -v`.
 
-This implements the Phase 2 membership-triggered synchronization slice of US-3.9 directly. There are no clustering/coordinator implementations or alternative run modes; a future fixed-membership Phase 3 comparator remains separate work.
+This implements the Phase 2 synchronization slice of US-3.9 and the Approach A comparator directly. There are no clustering/coordinator implementations or alternative run modes; reuse this engine with the same selected cohort and inputs for Phase 3 comparisons.
 
 Notebook sections (cells):
 1. Load input artifacts and constants.
@@ -246,28 +250,28 @@ Source-alignment checkpoints:
 10. Formula-level unit tests must compare implementation outputs for history, normalization, cluster quality, merge selection, FMIC/SMIC weights, node allowances, and coordinator allowances against hand-calculated examples.
 
 ### 6.9 Phase 3 Monitoring And Membership Policies
-#### Fixed-membership condition — primary clustering-effect experiment
+#### Approach A — matched fixed-cohort comparison
 1. Hold the sensor cohort constant, not the set of observed contributors. At each row, compute the mean of valid observations from that cohort divided by the observed contributor count; do not fill missing values.
-2. Do not trigger re-clustering or synchronization merely because of a membership-policy event.
-3. Produce a matched Phase 2 fixed-membership comparator using the same cohort, observed readings, timestamps, and denominator policy; do not compare fixed-membership Phase 3 against a Phase 2 run with different membership behavior.
-4. Use this condition to estimate the communication effect attributable to FMIC/SMIC clustering itself.
+2. Synchronize whenever the observed contributor set changes; Phase 3 reclusters on completion and activates new state next row. Availability changes are not suppressed because the cohort is fixed.
+3. Reuse the existing Phase 2 engine with the same cohort, observed readings, timestamps, threshold, and denominator/availability policy. Sensors outside the selected cohort do not participate.
+4. Estimate the algorithm communication difference under this shared realistic policy, not an availability-free clustering effect.
 5. No minimum observed count is imposed. Zero valid readings yield an undefined global mean and threshold decision, not safe/violated labels.
 6. Explicitly test changes in the observed denominator. A fixed cohort does not make observed contributors constant or establish monitoring correctness by itself.
 
-#### Dynamic-membership condition — secondary policy experiment
-1. Treat sensor departure/return handling as an additional experimental policy, not as part of the clustering algorithm.
+#### Observed-contributor changes — shared policy, not a separate experiment
+1. Treat departure/return handling as a shared availability policy, distinct from the clustering algorithm but required in every compared run.
 2. A sensor with no usable reading must not receive a fabricated zero-change history update.
 3. Detect departure on the first bucket without a valid reading after Phase 1 freshness filtering, and return on the first subsequent valid reading. Each departure/return triggers synchronization; reclustering occurs on its completion.
 4. When a sensor returns, perform the required synchronization/re-entry handling before resuming its history updates or cluster participation.
 5. Attribute requests, responses, and broadcasts caused by membership change to that synchronization cause while retaining their normal transmission-type counts. Cluster/coordinator information travels with threshold updates; do not add duplicate formation/reassignment traffic.
-6. Compare dynamic-membership FMIC/SMIC only against a matched Phase 2 run using the same departure/return and availability assumptions.
+6. Compare FMIC/SMIC only against the matched Phase 2 run using the same departure/return and availability assumptions. Do not generate identical fixed/dynamic variants or a no-availability-sync comparator.
 7. Compute the global mean from currently active sensors with valid readings, using the observed active count as the denominator. There is no minimum active-sensor count.
 8. With zero valid readings, record undefined global mean/threshold decision; no sensor value or safe/violated label is fabricated. Observation-dependent synchronization cannot complete until valid readings are available.
 
 #### Event-based clustering lifecycle and coordinators
-1. Cluster at initial synchronization and recluster at every later completed resynchronization, including monitoring-triggered, scheduled negative-margin, and dynamic membership-triggered synchronization. There is no periodic clustering schedule; a cluster check alone does not trigger reclustering.
+1. Cluster at initial synchronization and recluster at every later completed resynchronization, including monitoring-triggered, scheduled negative-margin, and observed-contributor-change synchronization. There is no periodic clustering schedule; a cluster check alone does not trigger reclustering.
 2. Each clustering event records the synchronization event/cause, histories used, partition, coordinator assignments, and activation row. Updated partitions, coordinators, references, and allowances apply starting on the next row.
-3. Initialize histories at zero at their required initial starting point. Retain accumulated histories across subsequent synchronizations; missing readings create no synthetic history update, and dynamic return requires re-entry synchronization before history updates resume.
+3. Initialize histories at zero at their required initial starting point. Retain accumulated histories across subsequent synchronizations; missing readings create no synthetic history update, and return requires re-entry synchronization before history updates resume.
 4. All-zero histories use the deterministic singleton fallback, including at initialization. No observation-dependent synchronization or fabricated cluster/coordinator assignment is completed when there are zero valid observations.
 5. At clustering, choose each cluster's highest-ID available member as coordinator; a singleton coordinates itself. Document deterministic ID ordering, including numeric versus string representation, and record old/new assignments when they change.
 6. Cluster formation/reassignment information is included with new thresholds in normal synchronization updates, with zero additional standalone formation/reassignment transmissions. Transmission types and event causes are separate accounting views, not additive duplicate totals.
@@ -297,7 +301,7 @@ The following tests must pass before full-data performance comparisons:
 8. Hand-counted communication scenario with 2–4 sensors: every request, response, trigger, cluster check, root escalation, synchronization broadcast, membership message, and reassignment message reconciles exactly to the expected count.
 9. History across multiple resynchronizations: accumulated history is retained rather than reset, and subsequent valid updates use the new synchronization reference.
 10. Lifecycle/coordinator cases: initialization, consecutive resynchronizations, no-resync intervals, next-row activation, highest-ID selection independent of input order, singleton fallback, and coordinator departure/return.
-11. Availability cases: fixed-cohort contributor/denominator changes, dynamic first-missing-bucket departure/return, one valid reading, and zero valid readings with undefined global state.
+11. Availability cases: fixed-cohort contributor/denominator changes, first-missing-bucket departure/return, one valid reading, and zero valid readings with undefined global state. Include a low-valued sensor departure that raises the mean above threshold without warming by any remaining sensor, and a returning sensor that changes the denominator.
 12. Bundled traffic and online-only synchronization: cluster/coordinator data adds no standalone transmissions to threshold updates; known offline sensors receive no requests or updates and generate no responses.
 
 ---
@@ -325,11 +329,22 @@ The following tests must pass before full-data performance comparisons:
 2. Precision (diagnostic only): TP / (TP + FP).
 3. Confusion counts: TP, FP, FN, TN.
 
+These remain synchronization-based legacy diagnostics: a positive prediction is
+same-row synchronization, not a local-warning flag or a root-confirmed global
+warning. `false_safe` counts globally violating rows without same-row
+synchronization; `false_alert` counts safe rows with synchronization, including
+startup/membership activity. The corrected `distributed_constraint_state` is not
+the predictor, and those counts must not be described as actual warning errors.
+
 ### 7.4 Detection Delay
 Compute delay by contiguous actual-positive event windows:
 1. For each window, find first predicted-positive minute in the same window.
 2. Delay is bucket index difference from window start.
 3. Report per-window delays and summary statistics.
+
+The hit is the first synchronization, not a local-warning event. Undefined global
+rows break windows. This task changes neither the legacy calculations nor their
+predictor.
 
 ### 7.5 Phase 3 Communication Accounting
 Report both source-comparable totals and diagnostic detail.
@@ -372,9 +387,9 @@ For each algorithm and alpha report:
 12. cluster count and cluster-size distribution.
 
 Primary attribution comparison:
-`clustering effect = matched fixed-membership Phase 3 result - matched fixed-membership Phase 2 result`.
+`algorithm difference under Approach A = matched Phase 3 result - matched Phase 2 result`.
 
-Membership-policy impact must be reported separately as the difference between fixed-membership and dynamic-membership variants under otherwise matched settings.
+Availability-related costs are reported by cause, not as a required fixed-versus-dynamic ablation. Subtracting cause-attributed traffic does not recover a no-availability-change counterfactual: synchronizations also change references, history evolution, and partition timing.
 
 Membership-triggered synchronization costs are attributed by cause even though they use normal synchronization request/response/update messages. Cluster information bundled into those updates does not add another message total.
 
@@ -391,6 +406,9 @@ A Phase 2 run is considered complete when:
 2. deterministic state fields are populated consistently.
 3. communication and diagnostic metrics are exported.
 4. run settings and threshold provenance are logged.
+5. Machine-readable metrics retain the full-precision computational p90 threshold and its source artifact/series/column, alongside the existing rounded presentation value.
+6. The headline communication reduction uses one centralized transmission per observed sensor per bucket. Configured-all-sensor and trigger-only legacy comparisons retain existing names/values but are labeled secondary compatibility comparisons.
+7. Input loading preserves empty CSV fields as missing observations, rejects malformed/non-finite temperature values with column/bucket context, and does not turn invalid text into a membership event.
 
 Recall is reported for diagnostics and trend tracking, but is not a hard pass/fail gate.
 
@@ -402,7 +420,7 @@ Phase 3 may proceed to full-data comparison only when:
 4. No synthetic test shows a global threshold violation concealed by cluster cancellation.
 5. History, partition, merge, allowance, and coordinator calculations match hand-calculated/source-aligned expectations.
 6. Communication categories reconcile exactly to total messages.
-7. Fixed-membership results are available before dynamic-membership results are used to discuss clustering performance.
+7. All comparisons use the same Approach A cohort, observations, threshold, timestamps, and availability-triggered synchronization policy, with explicit cause attribution.
 8. The alpha sensitivity sweep is complete for each algorithm before a preferred alpha is named.
 
 ---
@@ -418,6 +436,8 @@ Phase 3 may proceed to full-data comparison only when:
 6. communication category counts reconcile with total_message_count per row and in aggregate.
 7. old multivariate Phase 2 references are removed from Phase 2 sections.
 8. metrics definitions match deterministic rule outputs.
+9. Independent unrounded/CSV trace replay validates means, references, allowances, entry/exit continuity, membership, pending causes, local comparison coverage, triggers, and messages.
+10. Synthetic cases cover safe warming, signed and partial cancellation, multiple triggers, local/global boundaries, cooling recovery, unequal three/four-sensor states, and reporting-only forced-row violations. Corruption tests prove validation rejects inconsistent fields.
 
 ### 9.2 Phase 3
 1. Phase 2 comparator passes correctness tests before Phase 3 comparison.
@@ -429,7 +449,7 @@ Phase 3 may proceed to full-data comparison only when:
 7. node trigger, coordinator check, and root escalation are distinguishable in outputs.
 8. local warming detection remains observable even when cluster cancellation prevents root escalation.
 9. global violations are identical to matched reference calculations under the same availability assumptions.
-10. fixed-membership and dynamic-membership message totals are never pooled in the primary clustering-effect comparison.
+10. matched algorithm totals and overlapping cause-attribution totals are not pooled or presented as separate fixed/dynamic experiments.
 11. all Phase 3 message categories reconcile to the overall total.
 12. alpha sensitivity outputs preserve every tested alpha, not just the best-performing setting.
 13. clustering occurs at initialization and every completed resynchronization, never on a timer, with new state active on the next row.
@@ -474,12 +494,12 @@ Interpretation:
 2. The preferred alpha may be identified empirically only after viewing the complete sensitivity results.
 3. If the response is irregular or the minimum occurs between coarse-grid values, a secondary 0.01-step refinement may be added around the promising region.
 
-### 10.3 Phase 3 Membership Ablation
-For each selected FMIC/SMIC configuration, compare:
-1. fixed membership with no membership-triggered synchronization/re-clustering, and
-2. dynamic membership with the explicit departure/return policy enabled.
+### 10.3 Phase 3 Availability Attribution
+For each selected FMIC/SMIC configuration, report:
+1. matched Phase 2/FMIC/SMIC totals under Approach A, and
+2. departure/return events, completed availability-triggered synchronizations, coordinator changes, and their cause-attributed traffic.
 
-Report the incremental communication attributable to membership management separately from communication attributable to clustering.
+Do not claim this decomposition measures an availability-free clustering effect. No fixed/dynamic ablation or stable-availability subset experiment is required; either would need a separately agreed protocol.
 
 ---
 
@@ -499,7 +519,7 @@ Report the incremental communication attributable to membership management separ
 4. artifacts/phase2_temperature_metrics.json.
 5. Phase 3 row/cluster trace artifacts sufficient to reproduce cluster assignments, node/coordinator/root events, and message counts.
 6. Phase 3 alpha sensitivity summary for FMIC and SMIC.
-7. Phase 3 fixed-vs-dynamic membership ablation summary.
+7. Phase 3 matched Approach A comparison and availability cause-attribution summary.
 8. Phase 3 synthetic correctness test results.
 
 ### Documentation
@@ -532,13 +552,13 @@ Mitigation: enforce schema, formula, and communication-reconciliation checks in 
 Mitigation: label it as a baseline design choice and run the required 0.05–0.95 sensitivity sweep for FMIC and SMIC.
 
 7. Risk: attributing communication changes to clustering when they are caused by departure/return synchronization or re-clustering.  
-Mitigation: use fixed-membership as the primary clustering-effect condition and report dynamic-membership costs as a separate ablation.
+Mitigation: use the same fixed cohort and availability-triggered synchronization policy for every algorithm, report costs by cause, and describe savings as conditional on that shared policy rather than an availability-free effect.
 
 8. Risk: signed cancellation hides a true global threshold violation.  
 Mitigation: require synthetic cancellation tests and matched reference calculations before accepting any communication savings.
 
 9. Risk: stale history/reference state after missing readings or sensor return.  
-Mitigation: never inject zero change for missing data; require explicit re-entry synchronization before history resumes in the dynamic-membership condition.
+Mitigation: never inject zero change for missing data; require explicit re-entry synchronization before history resumes under Approach A.
 
 10. Risk: incorrect reproduction of the source clustering method.  
 Mitigation: add hand-calculated tests for history discounting, normalization, partition quality, greedy merge selection, FMIC/SMIC weights, node allowances, and coordinator allowances.

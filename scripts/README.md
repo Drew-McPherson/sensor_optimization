@@ -100,13 +100,15 @@ For a source-only repository, these outputs are generated locally and may be abs
 3. Local trigger rule: `event_{sensor}_local_deviation >= entry_{sensor}_local_margin`.
 4. Exported row trace includes `event_{sensor}_margin_proximity_score = entry_delta_global - event_{sensor}_local_deviation`; positive is acceptable and negative is violating.
 5. Trigger evaluation always uses `entry_*` state; any resulting state update is emitted as `exit_*` and applied on the next row.
-6. Forced rows (initialization, membership changes, or pending negative-margin syncs) do not run local trigger evaluation and must keep all `event_{sensor}_resync_requested` bits at `0`.
+6. Forced rows (initialization, membership changes, or pending negative-margin syncs) suppress operational triggers and keep all `event_{sensor}_resync_requested` bits at `0`. Local deviations/constraint comparisons are still calculated against valid entry references for reporting only.
 7. Forced rows must report `trigger_message_count = 0`; only request/response/broadcast fanout is counted for that row's synchronization.
 8. Logic uses unrounded values; exported numeric values are rounded to 4 decimal places for reporting.
 9. The notebook-integrated report generation applies the 4-decimal reporting convention consistently to exported numeric columns in the row trace and report artifacts.
 10. Correctness metrics use implemented row-local synchronization (`event_resync_performed`) rather than request generation (`event_any_sensor_requested_resync`).
 11. Undefined global rows have blank `global_violation`, `false_safe`, and `false_alert`, with `UNDEFINED` constraint-state labels; they are excluded from confusion counts and break detection windows.
 12. Synchronization is an operational action, not proof of a global threshold violation. Availability changes/startup may legitimately increase diagnostic false alerts.
+13. `distributed_constraint_state` is `VIOLATING` if any online sensor has `local_deviation >= entry local allowance`. It is `FEASIBLE` only when all online sensors are comparable and none violates, `NOT_EVALUABLE` when comparison coverage is incomplete with no known violation, and `UNDEFINED` with no observations.
+14. Local constraints use unrounded values even on reporting-only forced rows. The redundant `distributed_alert` column has been removed; use `event_resync_performed` for synchronization.
 
 ### Phase 2 Row Invariants
 1. `entry_*` fields are the state used to evaluate the current row.
@@ -148,7 +150,6 @@ For a source-only repository, these outputs are generated locally and may be abs
 5. Correctness observability fields:
 	- `centralized_constraint_state`
 	- `distributed_constraint_state`
-	- `distributed_alert`
 	- `false_safe`
 	- `false_alert`
 	- `violation_detection_delay_buckets`
@@ -162,13 +163,13 @@ For a source-only repository, these outputs are generated locally and may be abs
 Correctness interpretation:
 1. `event_any_sensor_requested_resync` remains the request-generation trace for local sensor warnings.
 2. `event_resync_performed` is the canonical implemented-mitigation trace for the current minute.
-3. `distributed_alert` mirrors `event_resync_performed` for row-level correctness reporting.
+3. `distributed_constraint_state` reports sensor-local allowance violations, not synchronization or a root-confirmed global warning. Forced rows can report `VIOLATING` with zero emitted local triggers.
 4. `false_safe` means the centralized system was violating and no re-sync was implemented on that same row.
 5. `false_alert` means a re-sync was implemented on a row where the centralized system remained feasible.
 
 ### Metrics Output Highlights
 `artifacts/phase2_temperature_metrics.json` includes:
-1. Policy metadata (`boundary_policy`, `trigger_policy`).
+1. Policy metadata (`boundary_policy`, `trigger_policy`), `threshold_source`, and `p90_threshold_full_precision` (the unrounded computational threshold). The existing `p90_threshold` remains a four-decimal presentation value.
 2. Confusion matrix plus diagnostic recall and precision, using `event_resync_performed` as the predicted-positive rule.
 3. Communication totals by category and two reduction ratios:
 	- primary ratio using `distributed_total_messages`
@@ -180,12 +181,19 @@ Correctness interpretation:
 	- `false_safe_count` (sum of row-level `false_safe`)
 	- `false_alert_count` (sum of row-level `false_alert`)
 6. Membership policy metadata, evaluable/undefined row counts, initialization/membership synchronization counts, and cause-attributed traffic.
-7. `centralized_sensor_messages` remains the `rows * configured_sensor_count` counterfactual. `centralized_observed_sensor_messages` counts only online observations and supplies `communication_reduction_ratio_observed`; the ratio is undefined when no readings exist.
+7. The headline comparison is `communication_reduction_ratio_observed`, identified by `headline_reduction_metric` and `headline_baseline_definition`. Its baseline, `centralized_observed_sensor_messages`, counts one transmission per valid observed sensor per bucket; the ratio is undefined when no readings exist.
+8. `centralized_sensor_messages` and `communication_reduction_ratio_primary` retain their existing configured-all-sensors counterfactual definitions for compatibility, not as the headline. The trigger-only legacy ratio is also unchanged.
+
+Input validation:
+- Phase 1 CSV empty fields are missing observations. Nonempty text (including `NA`, `NaN`, and whitespace), nonnumeric values, and infinities are rejected with the column and bucket rather than silently converted into departures.
+- The existing monitoring module normalizes sensor and aggregate temperature columns; genuine in-memory missing values remain missing. No imputation or local floating-point comparison changes are introduced.
 
 Metric interpretation note:
 1. `false_negative_count` now counts violating rows with no implemented re-sync on the same row.
 2. `false_positive_count` now counts implemented re-sync rows whose centralized state remained feasible.
 3. These metrics are intentionally distinct from request-only warning counts.
+4. Confusion counts, precision/recall, `false_safe`/`false_alert`, and detection delay retain their synchronization-based definitions for comparability. They are not actual global-warning accuracy metrics; delay is to the first synchronization in a global-violation window.
+5. The corrected local-constraint state is not substituted as the diagnostic predictor. No separate root-warning subsystem or duplicate reason column is introduced.
 
 Observability note:
 1. These correctness fields are reporting-only in the current phase.
@@ -207,13 +215,24 @@ Output content:
 	- One row per raw Phase 2 field.
 	- Explains what each field measures and how it is calculated.
 2. `phase2_sensor_reduction_analysis.csv`
-	- Baseline if sensors communicated every minute: `rows * sensor_count`.
+	- First row: `reduction_percent_observed`, the headline observed-availability reduction, computed from message counts rather than a rounded ratio; undefined with no readings.
+	- Supporting configured-sensor counterfactual baseline: `rows * sensor_count`.
 	- Actual POC communications: `distributed_total_messages`.
-	- Difference and primary reduction ratio/percent.
+	- Configured-sensor difference and compatibility reduction ratio/percent, explicitly labeled as non-headline.
 	- Supporting communication breakdown by message type.
 	- Observed-only baseline, reduction ratio/difference, initialization/membership attribution, and undefined-row counts.
 
 ### Membership regression tests
+Approach A is the agreed Phase 2/FMIC/SMIC comparison protocol: keep the selected
+cohort fixed while synchronizing on every change in observed contributors. Phase 3
+reclusters at each completed synchronization. The existing Phase 2 engine already
+implements this baseline; its `dynamic_observed_only` metadata describes changing
+availability within the selected cohort, not a separate experimental variant.
+Use identical cohort columns, readings, timestamps, threshold, and availability
+rules in each algorithm. Do not disable availability synchronization or add
+duplicate fixed/dynamic modes. Report savings under this shared policy and
+availability costs by cause, not as an availability-free causal effect.
+
 Run from the repository root using the selected Python environment:
 
 ```powershell
@@ -221,9 +240,27 @@ python -m unittest scripts.test_phase2_monitoring -v
 ```
 
 Tests exercise startup, every departure/return, coinciding causes, next-row state,
-all-offline/leading-empty buckets, boundary rules, online-only traffic, and the
+all-offline/leading-empty buckets, unrounded boundary rules, signed/partial
+cancellation, simultaneous triggers, cooling recovery, unequal three/four-sensor
+states, forced-row reporting, deliberately corrupted traces, online-only traffic, and the
 notebook's report generation and integrated validation. No clustering or alternate
 Phase 2 run mode is introduced.
+Specific denominator regressions verify that departure of a low-valued sensor
+can raise the global mean above threshold without any remaining sensor warming,
+and that a returning sensor changes the mean and receives a fresh next-row reference.
+
+### Full trace validation
+
+The existing monitoring module's `check_trace_invariants` independently replays
+reference state from the original observations and threshold; it does not call
+the production builder or advance state from its exported synchronization flags.
+The builder validates unrounded values before four-decimal reporting. Notebook
+Stage 4 validates the CSV against the same original inputs, allowing only the
+four-decimal reporting tolerance for numeric fields. Exact trigger/threshold
+decisions are recomputed from unrounded inputs, never inferred from rounded CSV
+values. Errors identify the bucket and field/sensor. Checks cover reference and
+allowance continuity, synchronized means, membership sets, local-state coverage,
+causes/pending state, emitted triggers, and message totals.
 
 ## Phase 2 Integrated Validation
 

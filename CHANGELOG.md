@@ -6,6 +6,63 @@ This file tracks implemented changes in this repository.
 
 ## 2026-10-21
 
+### 5. Adopted Approach A for matched Phase 3 comparisons
+- Summary:
+  - Replaced the fixed-versus-dynamic experiment split with one fixed selected cohort and synchronization on every observed-contributor change, shared by Phase 2, FMIC, and SMIC.
+  - Updated US-3.1, US-3.8, US-3.9, related lifecycle/attribution stories, plan gates, sequence, risks, and deliverables to use the existing Phase 2 comparator rather than a duplicate no-availability-sync mode.
+  - Added denominator regressions for a low-valued sensor departure raising the mean above threshold without remaining-sensor warming, and a return refreshing references on the next row.
+- Affected files:
+  - Phase_3_User_Stories.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - scripts/README.md
+  - instructions/distributed_monitoring_notebook_required_changes.md
+  - scripts/test_phase2_monitoring.py
+  - CHANGELOG.md
+- Rationale and impact:
+  - Fixed cohort does not imply constant observed contributors. Availability-triggered synchronization preserves the agreed observed-only monitoring policy across all algorithms.
+  - Existing Phase 2 runtime behavior, metadata identifiers, and outputs remain unchanged. Phase 3 reclusters on completed availability synchronizations; identical fixed/dynamic experiments and a membership ablation are no longer required.
+  - Algorithm savings are conditional on the shared availability policy; overlapping cause attribution is not an availability-free causal effect. Floating-point boundary changes remain deferred.
+  - Validation: all 30 existing/expanded tests passed, including both denominator regressions and notebook integration. Changelog and whitespace checks passed; no production monitoring logic changed.
+
+### 4. Hardened Phase 2 input loading and clarified comparison reporting
+- Summary:
+  - Added shared temperature normalization and wired notebook input loading to preserve empty CSV fields while rejecting nonempty invalid text and infinities with column/bucket errors.
+  - Added full-precision computational p90 and source metadata without changing the existing rounded threshold field.
+  - Made observed-availability communication reduction the explicit headline in metrics metadata and the first analysis-report row; retained existing configured-sensor and legacy metric names and calculations.
+  - Expanded the existing suite to 28 tests, including real notebook loading, invalid/missing values, persisted precision, distinct denominators, negative savings, and undefined zero-observation reporting.
+- Affected files:
+  - scripts/phase2_monitoring.py
+  - scripts/test_phase2_monitoring.py
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/README.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Invalid observations must fail explicitly rather than masquerade as departures. Precision and comparison labels must support matched observed-only Phase 3 analysis.
+  - Valid input monitoring behavior and existing metrics are preserved; reports gain additive metadata and a headline percentage row. Missing CSV values must be empty fields, not nonempty sentinel strings.
+  - Floating-point boundary behavior is intentionally deferred at the user's request. The fixed-cohort comparator policy remains undecided and is not implemented.
+  - Validation: all 28 targeted tests and the full 218,148-row notebook pipeline passed; every pre-existing metric remained exactly unchanged, including 663,650 total messages. The computational threshold is exported as 24.343381.
+
+### 3. Corrected Phase 2 local-constraint reporting and strengthened baseline validation
+- Summary:
+  - Changed `distributed_constraint_state` to reflect entry sensor-local allowance violations, not synchronization; added reporting-only comparisons on forced rows and explicit incomplete/no-observation states.
+  - Removed the redundant `distributed_alert` column. Retained reason/causes fields and labeled existing confusion, false-safe/false-alert, precision/recall, and delay calculations as synchronization diagnostics, not actual global-warning accuracy.
+  - Extended the existing module with independent original-input trace replay before rounding and after CSV export, including bucket/field errors and precision-aware numeric checks.
+  - Expanded the existing suite to 25 tests with cancellation, multi-sensor boundaries, cooling, comparison coverage, an independent reference oracle, and deliberate trace corruption.
+- Affected files:
+  - scripts/phase2_monitoring.py
+  - scripts/test_phase2_monitoring.py
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/README.md
+  - instructions/distributed_monitoring_notebook_required_changes.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - Phase_3_User_Stories.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Separates local sensor constraints, the centralized global threshold oracle, and synchronization actions without adding clustering, a warning subsystem, or one-off repository scripts.
+  - Reporting intentionally changes the local-state column and populates forced-row deviation/proximity values; startup/incomplete coverage is `NOT_EVALUABLE`, and all-offline state remains `UNDEFINED`.
+  - Validation: all 25 tests and the full 218,148-row pipeline passed. A saved before/after comparison confirmed 71 preserved output columns and every pre-existing metric unchanged, including synchronization events and 663,650 total messages.
+
 ### 2. Implemented Phase 2 synchronization on every membership change
 - Summary:
   - Added a tested observed-only state machine and wired it into the Phase 2 notebook: every departure/return triggers one synchronization, coinciding causes are retained, and negative-margin precedence/next-row state timing are preserved.

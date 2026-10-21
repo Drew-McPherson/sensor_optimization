@@ -15,6 +15,44 @@ The corrected implementation should:
 
 ## Active Implementation Policy Note
 
+### Approach A comparison policy (2026-10-21)
+
+Keep the selected cohort constant, but synchronize on every observed-contributor
+departure/return. Apply this same policy to Phase 2, FMIC, and SMIC; Phase 3
+reclusters on each completed synchronization. The existing Phase 2 engine already
+implements this comparator, so no duplicate fixed/dynamic modes are required.
+The `dynamic_observed_only` metadata refers to changing availability within the
+cohort. Mean/threshold changes caused solely by a changed denominator must still
+be caught by availability-triggered synchronization. Report algorithm differences
+under the matched policy and availability costs by cause; do not interpret
+subtracting those costs as a no-availability-change counterfactual.
+
+### Local-state reporting and correctness validation (2026-10-21)
+
+1. `distributed_constraint_state` means a sensor-local allowance violation, not
+   that synchronization occurred: `VIOLATING` if any online sensor has deviation
+   greater than or equal to its entry allowance; `FEASIBLE` only when every online
+   sensor has a valid comparison and none violates. Incomplete comparison coverage
+   is `NOT_EVALUABLE`; no readings is `UNDEFINED`.
+2. Forced synchronization rows still calculate deviations and local comparisons
+   for reporting, using entry state, but emit zero local triggers and preserve
+   existing synchronization reasons, causes, traffic, and next-row timing.
+3. Remove `distributed_alert`, formerly a redundant synchronization alias. Use
+   `event_resync_performed` to identify a completed synchronization, and the
+   existing reason/causes fields to explain it.
+4. Confusion metrics, precision/recall, false-safe/false-alert, and detection delays
+   remain synchronization-based diagnostics, not actual global-warning accuracy.
+   The new local-state meaning does not change their predictor or calculation.
+5. Extend the existing monitoring module/test suite rather than add one-off
+   validation scripts. Independently replay unrounded source observations to
+   check means, references, allowances, state continuity, triggers, membership,
+   pending causes, comparison coverage, and traffic. Validate before rounding and
+   in notebook Stage 4 after export; CSV numeric checks allow reporting precision,
+   but boundary decisions always use original unrounded inputs.
+6. Synthetic tests cover safe/partial cancellation, simultaneous triggers,
+   cooling recovery, unequal multi-sensor states, forced-row reporting, boundary
+   cases, and deliberately corrupted traces rejected with bucket/field details.
+
 ### Membership-aware Phase 2 policy (2026-10-21)
 
 The active notebook uses `scripts/phase2_monitoring.py` and implements the Phase 2
