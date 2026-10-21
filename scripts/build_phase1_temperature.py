@@ -317,7 +317,6 @@ def discover_csv_files(data_dir: Path, limit_files: Optional[int]) -> List[Path]
 def build_phase1_temperature(
     files: List[Path],
     bucket_size_seconds: int,
-    max_forward_fill_buckets: int,
     stale_threshold_seconds: int,
     min_devices_per_snapshot: int,
     drop_snapshot_if_stale_over_threshold: bool,
@@ -743,7 +742,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     raw_index_rows, aligned_rows, qc = build_phase1_temperature(
         files=files,
         bucket_size_seconds=int(global_cfg["bucket_size_seconds"]),
-        max_forward_fill_buckets=int(global_cfg.get("max_forward_fill_buckets", 0)),
         stale_threshold_seconds=int(phase1_cfg["stale_threshold_seconds"]),
         min_devices_per_snapshot=int(global_cfg["min_devices_per_snapshot"]),
         drop_snapshot_if_stale_over_threshold=bool(global_cfg.get("drop_snapshot_if_stale_over_threshold", True)),

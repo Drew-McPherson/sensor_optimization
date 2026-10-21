@@ -21,14 +21,11 @@ For a source-only repository, these outputs are generated locally and may be abs
 
 ## Key Columns In `aligned_phase1_temperature.csv`
 1. `average_temperature_all_devices`
-	- Mean temperature across all per-device values that remain in the row after staleness filtering.
-	- Includes both direct and imputed values when those values are retained in the row.
+	- Mean temperature across all observed per-device values that remain in the row after staleness filtering.
+	- Missing device values stay blank rather than being filled by carry-forward or other synthetic values.
 2. `average_temperature_all_devices_count`
 	- Number of device values included in `average_temperature_all_devices` for that bucket.
-	- Added for auditability so reviewers can see sample size behind each average.
-3. `average_temperature_non_imputed_devices`
-	- Mean temperature across retained per-device values that are not imputed.
-	- Excludes imputed values while following the same staleness-filtered row logic.
+	- Added for auditability so reviewers can see the sample size behind each average.
 
 ## Phase 1 Average Statistics Artifact
 `artifacts/phase1_average_statistics.csv` is generated from aligned Phase 1 rows
@@ -38,10 +35,8 @@ Rules:
 1. The statistics are unweighted; `snapshot_confidence` is only used as a cutoff.
 2. Metrics include mean, standard deviation, and percentiles every 5 points
    from `p05` through `p95`.
-3. The artifact includes these series:
-	- all-device average (`average_temperature_all_devices`)
-	- non-imputed average (`average_temperature_non_imputed_devices`)
-	- imputation delta (`average_temperature_all_devices - average_temperature_non_imputed_devices`)
+3. The artifact includes the observed-only all-device series:
+	- all-device observed average (`average_temperature_all_devices`)
 
 ## Run Commands
 ### Smoke test (small subset)
@@ -82,7 +77,7 @@ Distributed_Data_Streams semantics take priority if any wording conflicts.
 For a source-only repository, these outputs are generated locally and may be absent until you run the notebook or `scripts/run_phase2_notebook.py`.
 
 ### Logic Summary
-1. Read p90 from `phase1_average_statistics.csv` each run using the all-devices series `all_devices_including_imputed`.
+1. Read p90 from `phase1_average_statistics.csv` each run using the all-devices observed series `all_devices_observed`.
 2. Initialize synchronized global and per-sensor reference state from row 1 using the all-devices global average column `average_temperature_all_devices`.
 3. Compute the row-level observed global average for each minute as the arithmetic mean of the current row's observed sensor readings.
 4. Compute per-sensor local deviation each minute: `delta_v_i(t) = v_i(t) - v_i(t0_i)`.

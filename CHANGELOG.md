@@ -4,6 +4,38 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-10-21
+
+### 1. Locked the Phase 3 observed-only protocol and clustering lifecycle
+- Summary:
+  - Named `140516editor Book Chapter (Last Version).pdf` as the definitive methodology source and clarified source-preserving history retention across synchronization.
+  - Replaced open-ended availability/imputation assumptions with observed-only fixed-cohort and dynamic-membership rules, including first-missing-bucket departure, return synchronization, no minimum active count, and undefined global state with zero observations.
+  - Added US-3.15 for event-based clustering at initialization/every completed resynchronization, next-row activation, and highest-ID available coordinator selection.
+  - Specified bundled cluster/threshold updates, synchronization-cause attribution without double-counting, and transmitted requests to offline sensors without fabricated responses.
+- Affected files:
+  - Phase_3_User_Stories.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes the agreed Phase 3 protocol consistent and testable across the plan and stories without adding the deferred reproducible-execution story.
+  - Documentation only: no pipeline code, notebooks, generated artifacts, or historical changelog entries were changed. Runtime compliance remains subject to the documented implementation and correctness tests.
+
+## 2026-10-08
+
+### 1. Finalized the observed-only Phase 1 contract and removed legacy imputation references
+- Summary:
+  - Removed stale imputation parameters and naming from the active Phase 1 builder and regenerated the artifact set from the observed-only path.
+  - Updated the Phase 2 notebook and project documentation to use the canonical `all_devices_observed` series instead of legacy imputation-era names.
+- Affected files:
+  - scripts/build_phase1_temperature.py
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/README.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - The active pipeline now keeps missing device values blank, reduces coverage/confidence on sparse snapshots, and does not invent values by carry-forward.
+  - Regenerating `artifacts/phase1_average_statistics.csv` and downstream Phase 2 artifacts aligns the active output contract with the observed-only design and removes stale imputation labels from the repository workflow.
+
 ## 2026-10-07
 
 ### 1. Archived the replay validation notebook from the active source tree
