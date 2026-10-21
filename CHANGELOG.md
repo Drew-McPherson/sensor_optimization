@@ -6,6 +6,26 @@ This file tracks implemented changes in this repository.
 
 ## 2026-10-21
 
+### 2. Implemented Phase 2 synchronization on every membership change
+- Summary:
+  - Added a tested observed-only state machine and wired it into the Phase 2 notebook: every departure/return triggers one synchronization, coinciding causes are retained, and negative-margin precedence/next-row state timing are preserved.
+  - Counted startup synchronization and online-only request/response/threshold-update fanout, with free availability detection and no offline traffic. This supersedes the earlier offline-request assumption recorded below.
+  - Removed look-ahead initialization and old-mean fallback for empty buckets; undefined global state remains pending with zero traffic and is excluded from classification/delay diagnostics.
+  - Extended trace fields, policy metadata, cause attribution, observed-only centralized comparisons, data dictionary, and integrated validation; cleared stale notebook execution outputs.
+- Affected files:
+  - scripts/phase2_monitoring.py
+  - scripts/test_phase2_monitoring.py
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/README.md
+  - instructions/distributed_monitoring_notebook_required_changes.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - Phase_3_User_Stories.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Implements the Phase 2 slice of US-3.9 directly, without clustering, coordinators, or new run modes.
+  - Startup and previously missed membership events increase synchronization counts; traffic now excludes offline sensors. Legacy configured-cohort comparisons remain labeled separately from the matched observed-only baseline.
+  - Validation: 14 synthetic/notebook-integration tests passed, and the full 218,148-row Phase 2 run passed integrated artifact validation. The run detected 10,170 membership changes, all synchronized, and reported zero diagnostic false-safe rows; these dataset results are not a general proof of correctness.
+
 ### 1. Locked the Phase 3 observed-only protocol and clustering lifecycle
 - Summary:
   - Named `140516editor Book Chapter (Last Version).pdf` as the definitive methodology source and clarified source-preserving history retention across synchronization.

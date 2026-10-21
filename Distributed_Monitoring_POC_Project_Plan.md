@@ -38,7 +38,7 @@ Precedence rule for this repository:
 6. Global safety tracking follows the Distributed_Data_Streams formulation: monitor feasibility via margin-to-boundary semantics, with univariate temperature instantiated from p90 and global average.
 7. Operational local trigger for this deterministic POC is delta_v_i(t) >= margin_i (warming-only), with default equal local margin assignment at each synchronization event.
 8. Global margin uses delta_global = p90 - xbar(t0); logic uses unrounded values and delta may be negative.
-9. First-row initialization uses xbar(t0) = row1 global average and initializes per-sensor reference values from row1 sensor values.
+9. Initialize through a counted synchronization on the first bucket with valid observations. Leading empty buckets remain undefined with synchronization pending; never look ahead for a reference.
 10. If re-sync is triggered at row t, updated reference state applies starting row t+1; negative delta at row t schedules re-sync for row t+1.
 11. Communication reporting must include category-level counts (trigger, request, response, broadcast, total); request-only counts are retained as a legacy comparator.
 12. Canonical boundary convention is fixed for Phase 2 aligned outputs: safe when metric < boundary and violated when metric >= boundary.
@@ -62,7 +62,7 @@ Precedence rule for this repository:
 30. Cluster/coordinator information is included with normal synchronization threshold updates. It creates no additional standalone formation/reassignment transmissions; message types and synchronization causes must not double-count bundled traffic.
 31. Fixed membership keeps the cohort constant while averaging its currently observed readings. Dynamic departure occurs on the first missing bucket after Phase 1 freshness filtering; departure/return triggers synchronization and reclustering on completion.
 32. No minimum active-sensor count is imposed. Zero valid readings imply undefined global mean and threshold decision; observation-dependent synchronization cannot complete until valid readings are available.
-33. Count every transmitted request, including requests to offline sensors; count responses only when actually transmitted.
+33. Online/offline status is known without communication. Send synchronization requests and threshold updates only to currently online sensors, count only their responses, and generate zero offline-sensor traffic. Startup synchronization is included in totals.
 
 ---
 
@@ -128,14 +128,14 @@ Objective: consolidate metrics, sensitivity results, and stakeholder-ready outpu
 ## 5) Phase 2 Monitoring Logic (Discussion View)
 
 Per minute bucket:
-1. Read the current global average and per-sensor temperatures.
-2. If a re-sync was scheduled from the prior minute, perform synchronization first using current readings.
-3. Maintain per-sensor synchronized reference values and compute per-sensor local deviations.
-4. Evaluate local trigger condition delta_v_i(t) >= margin_i for each sensor.
-5. If any local trigger fires, perform one re-sync event for the minute.
-6. Recompute global margin from synchronized global state.
-7. If the resulting global margin is negative, schedule a re-sync for the next minute.
-8. Carry updated state forward starting next minute and log event-level communication counts.
+1. Determine the online set from valid Phase 1 observations and compare it to the preceding bucket; availability detection costs no messages.
+2. Compute the mean from current online readings, or record undefined global state when there are none.
+3. Initialization, membership changes, and pending negative-margin events force synchronization and skip local-trigger evaluation.
+4. Otherwise evaluate delta_v_i(t) >= margin_i using entry references for online sensors; any local trigger causes one synchronization.
+5. Combine coinciding causes into at most one synchronization per bucket, preserving all causes with negative-margin precedence.
+6. A completed synchronization contacts only online sensors, counting N requests, N responses, and N threshold updates. Local-trigger messages are counted only when actually generated.
+7. When all sensors are offline, send nothing, retain pending causes, and wait for observations to return; do not reuse a prior mean as the current observation.
+8. Apply synchronized references/margins starting next row; a negative exit margin schedules synchronization for the next row.
 
 Consistency note:
 1. Phase 2 uses local constraints as an operational sufficient-condition proxy for the DDS aggregate deviation bound.
@@ -165,33 +165,24 @@ Required columns in aligned Phase 1 input:
 2. Preferred series: all_devices_observed.
 
 ### 6.3 State Initialization
-For first row (t0):
-1. entry_xbar_t0 = row1_global_average.
-2. entry_delta_global = p90 - entry_xbar_t0.
-3. sensor_reference_values[s] = row1_sensor_value_s for each sensor s.
-4. local_margin_values[s] are assigned from the active global margin policy for each sensor s.
-5. resync_due_next_row = 0.
-
-Bootstrap edge-case note:
-1. This implementation intentionally preserves the startup phenomenon where a sensor may have no usable value at the first row and therefore carries a null or blank reference/deviation state for a bounded initialization window.
-2. This is treated as a known bootstrap condition for the deterministic experiment, not as a production-quality sensor health correction.
-3. The phenomenon is retained because it is part of the scenario being studied: exposure to cold-start state initialization, not a silent data-quality repair.
-4. Any future variant that eliminates this startup gap must be treated as a deliberate modeling change, not as a bug fix to the current deterministic policy.
+1. Start with undefined global/per-sensor references and margins, no prior membership set, and initialization pending.
+2. The first bucket's observed set establishes initial membership without fabricating departure/return events.
+3. Leading buckets without readings remain undefined, pending, and message-free. Never borrow values from a later row.
+4. At the first usable bucket, complete initialization: synchronize the observed mean and online per-sensor readings, with equal local margins `p90 - synchronized_mean`.
+5. Count N requests, N responses, and N threshold updates for the N online sensors, with zero local triggers. Record `event_initialization_performed` and `initialization_message_count`.
+6. Newly synchronized references and margins become next-row entry state. Sensors absent from synchronization have undefined references/margins; returning sensors force synchronization before local evaluation.
 
 ### 6.4 Per-Row Deterministic State Machine
 For each row t:
-1. Read `entry_*` state from the prior row's committed `exit_*` state and evaluate whether a scheduled re-sync must be consumed at row t.
-2. If scheduled, perform synchronization with current row values and update:
-   - reference global state,
-   - per-sensor reference values,
-   - global and local margins.
-3. Compute each sensor's event-local deviation delta_v_i(t) = v_i(t) - v_i(t0_i) using the row's `entry_*` references.
-4. For each sensor s, set the event-local trigger bit to 1 when delta_v_s(t) >= margin_s(t), else 0.
-5. event_resync_request_count_t = sum(local_trigger_bits_t).
-6. If event_resync_request_count_t > 0 and no prior scheduled re-sync was consumed, perform one local-violation re-sync event for row t.
-7. Compute actual_positive_global_t from the active boundary policy and record event_any_sensor_requested_resync_t from run-defined trigger semantics.
-8. Recompute exit-state global margin after synchronization events; if that margin is negative, set exit_resync_scheduled_next_row_t = 1.
-9. Apply any updated reference state starting row t+1.
+1. Read prior committed state into `entry_*`; determine current online sensors, departures, and returns from valid observations after Phase 1 freshness filtering.
+2. Add membership changes and initialization to pending synchronization causes. A departure is the first missing bucket and a return is the first subsequent valid bucket.
+3. If any forced cause is present, skip local evaluation and keep trigger bits/messages zero. Complete synchronization only if at least one sensor is online; otherwise retain pending causes without traffic.
+4. Without forced causes, compute online sensors' deviations from entry references and trigger when `deviation >= margin`. Any triggering sensors produce their trigger messages and one synchronization.
+5. At synchronization, set the exit global reference to the current observed mean, set online references/margins from current observations, and invalidate references/margins for excluded sensors.
+6. Count request/response/update fanout using the online count, not the configured cohort size. All membership status detection is free.
+7. Record all causes, primary reason, completed/pending status, and membership changes. Causes sharing one synchronization do not create duplicate traffic.
+8. The actual label is `observed_global_average >= p90` for evaluable rows, otherwise undefined. Diagnostic predicted positive remains `event_resync_performed`, not a claim of threshold violation.
+9. Carry new state into row t+1; schedule a negative-margin synchronization when the exit synchronized margin is negative, retaining it through empty buckets until synchronization can complete.
 
 ### 6.5 Row Invariants
 For each exported row:
@@ -205,25 +196,32 @@ For each exported row:
 artifacts/phase2_temperature_sensors.csv must include:
 1. bucket_epoch, bucket_time_utc.
 2. early audit fields: transition_summary, p90_threshold_used.
-3. row-level global timing fields: observed_global_average, entry_xbar_t0, entry_delta_global, exit_delta_global.
+3. row-level global timing fields: observed_global_average, entry_xbar_t0, entry_delta_global; exit global state is represented by the adjacent optional resync-result fields.
 4. optional resync-result fields: exit_xbar_t0_if_resync, exit_delta_global_if_resync.
 5. per-sensor current value, synchronized entry reference value, event-local deviation, and entry local allowance fields.
 6. one binary event-local trigger/re-sync-request flag per sensor (for example event_A_resync_requested).
 7. event_triggering_sensor_names, event_resync_request_count, event_any_sensor_requested_resync.
-8. re-sync consumption, trigger, execution, and scheduling fields (for example event_resync_consumed_from_prior_row, event_resync_triggered_by_local_violation, event_resync_performed, exit_resync_scheduled_next_row).
+8. re-sync execution and scheduling fields: event_resync_performed, event_initialization_performed, event_resync_triggered_by_membership_change, exit_resync_scheduled_next_row, exit_resync_pending, exit_resync_pending_causes. Consumption/local-cause helper bits remain internal; event_resync_causes preserves their meaning in the public trace.
 9. synchronization reason fields (for example local_constraint_violation, negative_delta_from_prior_row).
 10. communication event fields: trigger_message_count, request_message_count, response_message_count, broadcast_message_count, total_message_count.
+11. membership/evaluability fields: observed_online_sensor_names, observed_online_sensor_count, event_departing_sensor_names, event_returning_sensor_names, event_membership_changed, global_state_evaluable.
+12. cause-attribution fields: membership_resync_message_count and initialization_message_count. These may overlap and must not be added to transmission-type totals.
 
 Implementation precedence rule for `event_resync_reason` when more than one cause is possible in the same row:
 1. `negative_delta_from_prior_row`
-2. `local_constraint_violation`
-3. `sensor_recovered_after_offline`
+2. `initialization`
+3. `sensor_membership_changed`
+4. `local_constraint_violation`
 
-This hierarchy preserves the strictest state-machine cause first while still recording offline recovery as a documented reason when it is the active cause in the row.
+Record every cause in `event_resync_causes`, including deferred membership events. Forced synchronization rows suppress local triggers. The legacy conditional `sensor_recovered_after_offline` path is replaced by detection of every departure/return.
 
 ### 6.7 Phase 2 Implementation Artifact
 Required implementation artifact:
 1. scripts/build_phase2_temperature_sensors.ipynb.
+2. scripts/phase2_monitoring.py, the state machine used by the notebook and synthetic tests.
+3. scripts/test_phase2_monitoring.py, run with `python -m unittest scripts.test_phase2_monitoring -v`.
+
+This implements the Phase 2 membership-triggered synchronization slice of US-3.9 directly. There are no clustering/coordinator implementations or alternative run modes; a future fixed-membership Phase 3 comparator remains separate work.
 
 Notebook sections (cells):
 1. Load input artifacts and constants.
@@ -300,7 +298,7 @@ The following tests must pass before full-data performance comparisons:
 9. History across multiple resynchronizations: accumulated history is retained rather than reset, and subsequent valid updates use the new synchronization reference.
 10. Lifecycle/coordinator cases: initialization, consecutive resynchronizations, no-resync intervals, next-row activation, highest-ID selection independent of input order, singleton fallback, and coordinator departure/return.
 11. Availability cases: fixed-cohort contributor/denominator changes, dynamic first-missing-bucket departure/return, one valid reading, and zero valid readings with undefined global state.
-12. Bundled traffic and offline requests: cluster/coordinator data adds no standalone transmissions to threshold updates; requests sent to offline sensors count without inventing responses.
+12. Bundled traffic and online-only synchronization: cluster/coordinator data adds no standalone transmissions to threshold updates; known offline sensors receive no requests or updates and generate no responses.
 
 ---
 
@@ -308,7 +306,7 @@ The following tests must pass before full-data performance comparisons:
 
 ### 7.1 Label Definitions
 1. Actual positive minute: observed_global_average >= p90 (canonical aligned output rule).
-2. Predicted positive minute: derived from the run's local trigger/re-sync rule and explicitly logged as event_any_sensor_requested_resync in each run.
+2. Predicted positive minute for current Phase 2 diagnostics: `event_resync_performed == 1`. `event_any_sensor_requested_resync` remains the distinct local-request trace. Initialization/membership synchronization is operational activity, not proof of global violation.
 3. Any diagnostic variant boundary comparison must be flagged as non-canonical in output metadata.
 4. Under the Phase 3 observed-only protocol and its matched comparators, a zero-observation bucket has undefined actual global label, not a negative label. Report such buckets separately rather than treating them as safe in diagnostic metrics.
 
@@ -320,6 +318,7 @@ The following tests must pass before full-data performance comparisons:
    1 - distributed_total_messages / centralized_sensor_messages.
 5. Legacy comparator ratio (for backward comparability):
    1 - distributed_trigger_messages / centralized_sensor_messages.
+6. The configured-cohort baseline above is a counterfactual, not actual offline traffic. Also report `centralized_observed_sensor_messages = sum(observed_online_sensor_count)` and `communication_reduction_ratio_observed = 1 - distributed_total_messages / centralized_observed_sensor_messages`; this ratio is undefined if no readings exist.
 
 ### 7.3 Diagnostic Classification Metrics
 1. Recall (diagnostic only): TP / (TP + FN).
@@ -352,7 +351,7 @@ Rules:
 2. Category totals must reconcile exactly to the overall total.
 3. For comparison with the source paper, also report a broadcast-style aggregate using one consistent definition documented in run metadata.
 4. Phase 2, FMIC, and SMIC comparisons must use the same sensor-availability assumptions for the comparison being made.
-5. Count a transmitted request to an offline sensor even if there is no response. Count only actual response transmissions, not expected responses.
+5. Online/offline status is known without messages. Requests, responses, and threshold updates involve only currently online sensors; no communication is sent unnecessarily to offline sensors.
 6. Include cluster/coordinator information with normal synchronization threshold updates. Count the enclosing transmission once; no extra standalone formation/reassignment message is generated.
 7. Record initialization, monitoring, and membership-change causes on synchronization traffic. Cause attribution is a separate view of transmission-type totals; do not sum overlapping views into total messages.
 8. Use the same counting rules for initialization and all resynchronization causes. Local computation, absence detection, and coordinator selection are not themselves network transmissions.
@@ -435,7 +434,7 @@ Phase 3 may proceed to full-data comparison only when:
 12. alpha sensitivity outputs preserve every tested alpha, not just the best-performing setting.
 13. clustering occurs at initialization and every completed resynchronization, never on a timer, with new state active on the next row.
 14. accumulated histories survive resynchronization, and coordinator selection follows highest available sensor ID.
-15. zero-observation global state remains undefined, and requests to offline sensors do not imply response messages.
+15. zero-observation global state remains undefined, and offline sensors generate no traffic because availability is known without communication.
 16. bundled cluster/threshold updates are counted once; cause-attribution views reconcile without duplicate traffic.
 
 ---
@@ -545,7 +544,7 @@ Mitigation: never inject zero change for missing data; require explicit re-entry
 Mitigation: add hand-calculated tests for history discounting, normalization, partition quality, greedy merge selection, FMIC/SMIC weights, node allowances, and coordinator allowances.
 
 11. Risk: communication savings are overstated through incomplete counting.  
-Mitigation: count actual requests, responses, broadcasts, cluster checks, and root escalations, and attribute membership/coordinator events without double-counting bundled updates. Count requests sent to offline sensors without inferring responses; require exact reconciliation to total messages.
+Mitigation: count actual requests, responses, broadcasts, cluster checks, and root escalations, and attribute membership/coordinator events without double-counting bundled updates. Known offline sensors generate no traffic; require exact reconciliation to total messages.
 
 ---
 

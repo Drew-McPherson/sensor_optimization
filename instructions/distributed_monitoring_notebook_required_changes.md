@@ -15,6 +15,34 @@ The corrected implementation should:
 
 ## Active Implementation Policy Note
 
+### Membership-aware Phase 2 policy (2026-10-21)
+
+The active notebook uses `scripts/phase2_monitoring.py` and implements the Phase 2
+slice of US-3.9 without clustering or additional run modes. These rules supersede
+older descriptions below where they differ:
+
+1. Online/offline status is known without communication. Compare online sets each
+   bucket; first missing/returning observations trigger synchronization.
+2. Initialize at the first usable bucket and count startup traffic. Do not look
+   ahead when leading buckets have no readings.
+3. Each completed synchronization contacts only N currently online sensors:
+   N requests, N responses, N threshold updates. Offline traffic and membership
+   notification costs are zero.
+4. Combine causes into one synchronization per bucket, retain every cause in
+   `event_resync_causes`, and prefer `negative_delta_from_prior_row` as primary.
+   Initialization/membership/pending-negative-margin rows suppress local triggers.
+5. Global mean is the observed-only online mean. Zero online sensors means an
+   undefined global state, pending synchronization, and zero traffic, not reuse
+   of an older mean as a current observation. State updates apply next row.
+6. Classification diagnostics exclude undefined rows; synchronization is an
+   operational indicator, not a declaration that a threshold was violated.
+7. Report the configured-cohort counterfactual and a matched observed-only
+   centralized baseline separately. Cause-attributed traffic is not added again
+   to transmission-type totals.
+
+Run `python -m unittest scripts.test_phase2_monitoring -v` for synthetic state,
+message-count, and notebook-report regression tests.
+
 For the active Phase 2 implementation in this repository, the following canonical policy now applies:
 
 1. local trigger is warming-only: `local_deviation >= local_margin`,
@@ -413,7 +441,9 @@ M_{\text{trigger}} = \text{number of triggering sensors}
 
 #### 2. Request messages
 
-The root sends one request to each of the \(n\) sensors:
+Here \(n\) means currently online sensors, not the configured cohort. The root
+sends one request to each online sensor; offline status detection requires no
+notification and offline sensors receive no traffic:
 
 \[
 M_{\text{request}} = n
@@ -512,13 +542,12 @@ Only one full re-synchronization should occur for that minute unless the impleme
 
 The initial synchronization should be counted separately from later distributed monitoring events.
 
-Suggested fields:
+Implemented fields (initialization traffic is included once in the normal
+request/response/update totals, with a separate attribution view):
 
 ```python
-is_initial_sync
-initial_request_message_count
-initial_response_message_count
-initial_broadcast_message_count
+event_initialization_performed
+initialization_message_count
 ```
 
 This prevents the initial setup cost from being confused with ongoing monitoring costs.

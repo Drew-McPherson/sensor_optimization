@@ -61,8 +61,9 @@ Rules:
 ### Purpose
 Run deterministic Phase 2 local-deviation monitoring over aligned Phase 1 snapshots.
 
-The Phase 2 implementation follows the repository precedence rule where
-Distributed_Data_Streams semantics take priority if any wording conflicts.
+The Phase 2 implementation follows the definitive chapter and operational policies
+in the project plan. Its tested state machine is in `scripts/phase2_monitoring.py`;
+the notebook remains the execution/reporting entry point.
 
 ### Inputs
 1. `artifacts/aligned_phase1_temperature.csv`
@@ -78,31 +79,34 @@ For a source-only repository, these outputs are generated locally and may be abs
 
 ### Logic Summary
 1. Read p90 from `phase1_average_statistics.csv` each run using the all-devices observed series `all_devices_observed`.
-2. Initialize synchronized global and per-sensor reference state from row 1 using the all-devices global average column `average_temperature_all_devices`.
+2. Count initial synchronization on the first bucket with valid observations; leading empty buckets remain undefined without look-ahead.
 3. Compute the row-level observed global average for each minute as the arithmetic mean of the current row's observed sensor readings.
-4. Compute per-sensor local deviation each minute: `delta_v_i(t) = v_i(t) - v_i(t0_i)`.
-4. If a re-sync was scheduled from the prior row, consume that forced re-sync first and skip local trigger evaluation for that row.
-5. Otherwise evaluate local trigger per sensor using `local_deviation >= local_margin`.
-6. Perform one re-sync event for the minute when any local trigger fires.
-7. Count forced-row communication with trigger messages fixed at zero and fanout traffic only.
-8. Apply updated synchronized state starting next row.
-9. If global margin after synchronization is negative, schedule re-sync for the next row.
-10. Use canonical boundary policy for aligned outputs: safe `<` boundary, violated `>=` boundary.
-11. Export per-row trace plus diagnostic metrics.
-12. Generate integrated report artifacts (`phase2_data_dictionary.csv` and `phase2_sensor_reduction_analysis.csv`) in Stage 3 from the final row/metrics artifacts.
-13. Run integrated Stage 4 validation checks inside the notebook for smoke and export-policy invariants.
+4. Detect every departure/return from the current versus previous online set, at the first missing/returning bucket after Phase 1 freshness filtering. Status detection costs no messages.
+5. Initialization, membership changes, and pending negative-margin causes force one combined synchronization and suppress local-trigger evaluation. Negative-margin cause has primary precedence; all causes are retained.
+6. Otherwise compute `delta_v_i(t) = v_i(t) - v_i(t0_i)` and evaluate local trigger per online sensor using `local_deviation >= local_margin`.
+7. Perform one re-sync event for the minute when any local trigger fires.
+8. Count N requests, N responses, and N threshold updates for N currently online sensors, including startup. Offline sensors generate zero traffic.
+9. Apply updated synchronized state starting next row.
+10. If global margin after synchronization is negative, schedule re-sync for the next row.
+11. Use canonical boundary policy for aligned outputs: safe `<` boundary, violated `>=` boundary.
+12. Export per-row trace plus diagnostic metrics.
+13. Generate integrated report artifacts (`phase2_data_dictionary.csv` and `phase2_sensor_reduction_analysis.csv`) in Stage 3 from the final row/metrics artifacts.
+14. Run integrated Stage 4 validation checks inside the notebook for smoke and export-policy invariants.
+15. With no online sensors, global state/threshold labels are undefined, no traffic is generated, and synchronization remains pending until valid readings return. There is no minimum online count.
 
 ### Canonical Policies
 1. Global violation label in aligned output: `observed_global_average >= p90_threshold`.
 2. The Phase 2 implementation uses the strict all-devices p90 threshold source while computing the row-level observed global average directly from the current minute's sensor readings.
 3. Local trigger rule: `event_{sensor}_local_deviation >= entry_{sensor}_local_margin`.
 4. Exported row trace includes `event_{sensor}_margin_proximity_score = entry_delta_global - event_{sensor}_local_deviation`; positive is acceptable and negative is violating.
-3. Trigger evaluation always uses `entry_*` state; any resulting state update is emitted as `exit_*` and applied on the next row.
-4. Forced rows (`event_resync_consumed_from_prior_row == 1`) do not run local trigger evaluation and must keep all `event_{sensor}_resync_requested` bits at `0`.
-5. Forced rows must report `trigger_message_count = 0`; only request/response/broadcast fanout is counted for that row's synchronization.
-6. Logic uses unrounded values; exported numeric values are rounded to 4 decimal places for reporting.
-7. The notebook-integrated report generation applies the 4-decimal reporting convention consistently to exported numeric columns in the row trace and report artifacts.
-8. Correctness metrics use implemented row-local synchronization (`event_resync_performed`) rather than request generation (`event_any_sensor_requested_resync`).
+5. Trigger evaluation always uses `entry_*` state; any resulting state update is emitted as `exit_*` and applied on the next row.
+6. Forced rows (initialization, membership changes, or pending negative-margin syncs) do not run local trigger evaluation and must keep all `event_{sensor}_resync_requested` bits at `0`.
+7. Forced rows must report `trigger_message_count = 0`; only request/response/broadcast fanout is counted for that row's synchronization.
+8. Logic uses unrounded values; exported numeric values are rounded to 4 decimal places for reporting.
+9. The notebook-integrated report generation applies the 4-decimal reporting convention consistently to exported numeric columns in the row trace and report artifacts.
+10. Correctness metrics use implemented row-local synchronization (`event_resync_performed`) rather than request generation (`event_any_sensor_requested_resync`).
+11. Undefined global rows have blank `global_violation`, `false_safe`, and `false_alert`, with `UNDEFINED` constraint-state labels; they are excluded from confusion counts and break detection windows.
+12. Synchronization is an operational action, not proof of a global threshold violation. Availability changes/startup may legitimately increase diagnostic false alerts.
 
 ### Phase 2 Row Invariants
 1. `entry_*` fields are the state used to evaluate the current row.
@@ -148,6 +152,12 @@ For a source-only repository, these outputs are generated locally and may be abs
 	- `false_safe`
 	- `false_alert`
 	- `violation_detection_delay_buckets`
+6. Membership and pending-state fields:
+	- `observed_online_sensor_names`, `observed_online_sensor_count`
+	- `event_departing_sensor_names`, `event_returning_sensor_names`, `event_membership_changed`
+	- `event_resync_causes`, `event_resync_triggered_by_membership_change`, `event_initialization_performed`
+	- `exit_resync_pending`, `exit_resync_pending_causes`, `global_state_evaluable`
+7. Cause attribution: `membership_resync_message_count`, `initialization_message_count`. Causes may overlap; these counters are not added to transmission totals.
 
 Correctness interpretation:
 1. `event_any_sensor_requested_resync` remains the request-generation trace for local sensor warnings.
@@ -169,6 +179,8 @@ Correctness interpretation:
 	- `false_positive_count` (alias of confusion `fp`)
 	- `false_safe_count` (sum of row-level `false_safe`)
 	- `false_alert_count` (sum of row-level `false_alert`)
+6. Membership policy metadata, evaluable/undefined row counts, initialization/membership synchronization counts, and cause-attributed traffic.
+7. `centralized_sensor_messages` remains the `rows * configured_sensor_count` counterfactual. `centralized_observed_sensor_messages` counts only online observations and supplies `communication_reduction_ratio_observed`; the ratio is undefined when no readings exist.
 
 Metric interpretation note:
 1. `false_negative_count` now counts violating rows with no implemented re-sync on the same row.
@@ -199,6 +211,19 @@ Output content:
 	- Actual POC communications: `distributed_total_messages`.
 	- Difference and primary reduction ratio/percent.
 	- Supporting communication breakdown by message type.
+	- Observed-only baseline, reduction ratio/difference, initialization/membership attribution, and undefined-row counts.
+
+### Membership regression tests
+Run from the repository root using the selected Python environment:
+
+```powershell
+python -m unittest scripts.test_phase2_monitoring -v
+```
+
+Tests exercise startup, every departure/return, coinciding causes, next-row state,
+all-offline/leading-empty buckets, boundary rules, online-only traffic, and the
+notebook's report generation and integrated validation. No clustering or alternate
+Phase 2 run mode is introduced.
 
 ## Phase 2 Integrated Validation
 
