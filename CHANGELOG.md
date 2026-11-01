@@ -4,6 +4,157 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-10-29
+
+### Implemented US-3.4 partition quality and greedy merging
+- Summary:
+  - Added scalar cluster/partition quality and deterministic greedy merging inside the existing Phase 3 notebook.
+  - Retained all candidate partitions through two clusters, scored partners by merged-cluster quality, and selected the earliest minimum-quality candidate using the approved tie rules.
+  - Preserved empty deferral and all-zero singleton fallback; added explicit singleton/pair behavior and input validation.
+  - Extended the existing event CSV with separate alpha evaluations, candidate qualities, partner scores, merge decisions, and final assignments linked to one shared normalization snapshot.
+  - Extended the existing test harness and updated story implementation notes, run documentation, and the project plan. No new source or output files were introduced.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_history.py
+  - Phase_3_User_Stories.md
+  - scripts/README.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Implements auditable source-aligned partition construction for every alpha while preserving raw history and Phase 2 behavior. FMIC/SMIC allowances, coordinator/runtime activation, and communication comparisons remain later work.
+- Validation:
+  - `python -B -m unittest scripts.test_phase3_history scripts.test_phase2_monitoring -q` passed all 60 tests, including the eight-sensor alpha sweep and near-equal-score decisions.
+  - Notebook JSON and all eight Python cells parsed successfully; `git diff --check` passed.
+
+## 2026-10-28
+
+### Implemented scalar normalization for US-3.3
+- Summary:
+  - Added scalar history normalization to the existing Phase 3 notebook, restricted to selected-cohort sensors that are online with valid observations at a completed synchronization.
+  - Added explicit no-eligible-sensors deferral and a nonempty all-zero-history case that records one singleton per eligible sensor as a no-information fallback without running merges.
+  - Enriched the existing synchronization-event output with event-linked normalization snapshots, and created in-memory inputs for the full alpha sweep that share the same immutable snapshot.
+  - Added tests for signed normalization, offline exclusion, tied maxima, empty/all-zero cases, raw-history preservation, and shared alpha inputs.
+  - Clarified US-3.3, the project plan, and the scripts README. No new files or output artifacts were added.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_history.py
+  - scripts/README.md
+  - Phase_3_User_Stories.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes eligibility and the zero-history behavior explicit, and ensures the alpha sweep starts from one consistent event normalization. Alpha-specific clustering results remain for the later clustering stories.
+- Validation:
+  - `python -m unittest scripts.test_phase3_history scripts.test_phase2_monitoring -v` passed all 49 tests.
+  - Notebook JSON/Python syntax validation and `git diff --check` passed.
+
+## 2026-10-28
+
+### Tidied US-3.3 formatting
+- Summary:
+  - Streamlined US-3.3's mathematical layout by keeping simple expressions inline and grouping the normalization example into an aligned display block.
+  - Reformatted the end-to-end sequence for readability without changing the story's requirements or wording.
+- Affected files:
+  - Phase_3_User_Stories.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes the normalization rules and examples easier to scan; there is no behavior or requirement change.
+- Validation:
+  - Reviewed the edited US-3.3 section and checked patch whitespace.
+
+## 2026-10-28
+
+### Tidied US-3.2 formatting
+- Summary:
+  - Streamlined the mathematical layout in US-3.2 by keeping simple expressions inline and grouping related equations into aligned display blocks.
+  - Reformatted the hand-calculated example as one aligned set of updates without changing the story's requirements or wording.
+- Affected files:
+  - Phase_3_User_Stories.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes the history equations and timing easier to scan; there is no behavior or requirement change.
+- Validation:
+  - Reviewed the edited US-3.2 section and checked patch whitespace.
+
+## 2026-10-28
+
+### Expanded US-3.2 synchronization and history auditing
+- Summary:
+  - Added monotonically increasing synchronization IDs and stored each sensor reference's establishing ID in the notebook history tracker.
+  - Added a normalized row-by-sensor trace for every input bucket, including missing sensors and rows without synchronization. It records entry references, pre/post history, signed deviation, whether an update occurred, and a reason when skipped.
+  - Kept event snapshots as clustering inputs and added synchronization/reference IDs to those records. The notebook runner also validates row bucket alignment with the matched Phase 2 trace.
+  - Expanded regression coverage for US-3.2's minimum hand-calculated example, signed alternating deviations, synchronization-row timing, ID linkage, and update/skip audit rows.
+  - Updated the US-3.2 implementation notes, scripts README, and project plan to describe the two outputs and required trace.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_history.py
+  - scripts/README.md
+  - Phase_3_User_Stories.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - The revised story requires a reconstructable audit of each sensor's history update and the synchronization reference that authorized it. Event snapshots alone did not contain enough row-level detail. Phase 2 behavior and outputs are unchanged.
+- Validation:
+  - `python -m unittest scripts.test_phase3_history scripts.test_phase2_monitoring -v` passed all 44 tests.
+  - Notebook JSON/tag validation and `git diff --check` passed.
+
+## 2026-10-28
+
+### Implemented source-aligned Phase 3 sensor history
+- Summary:
+  - Added `scripts/build_phase3_temperature_clustering.ipynb`, adapted from the Phase 2 notebook, with `SensorHistoryTracker` in a notebook code cell. It maintains one discounted history value and active synchronization reference per sensor, updates from the entry reference, and returns auditable snapshots when synchronization completes.
+  - Implemented zero-history initialization, combined and deferred synchronization causes, automatic membership-change synchronization, missing/offline history retention, and synchronized re-entry without stale-reference updates.
+  - Added a notebook runner stage that checks history synchronization against the Phase 2 reference and writes `artifacts/phase3_sensor_history_events.csv`.
+  - Added a regression harness that executes the notebook implementation cells and hand-calculated tests for active-reference differences, synchronization-row ordering, multiple synchronizations, missing/returning sensors, zero-observation rows, and invalid inputs.
+  - Added US-3.2 implementation notes, documented the notebook workflow in `scripts/README.md`, and listed the notebook/test artifacts and verification gate in the project plan.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_history.py
+  - scripts/README.md
+  - Phase_3_User_Stories.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Keeps all Phase 3 implementation in the agreed notebook while providing regression coverage against its actual code cells. It emits event snapshots rather than adding history columns to every minute row. No Phase 2 behavior or output changes.
+- Validation:
+  - `python -m unittest scripts.test_phase3_history scripts.test_phase2_monitoring -v` passed all 41 tests.
+
+## 2026-10-28
+
+### Clarified US-3.2 history update lifecycle
+- Summary:
+  - Reformatted US-3.2 and specified the per-row history update order, including initialization, later synchronization rows, missing observations, return synchronization, and zero-observation rows.
+  - Clarified that histories persist across offline periods and synchronizations, and that clustering-event snapshots are sufficient audit outputs without per-minute history columns.
+  - Aligned the project plan's event-based lifecycle with these history timing rules.
+- Affected files:
+  - Phase_3_User_Stories.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Explicit operation order prevents implementations from disagreeing about which reference is used or whether history is discounted on missing data or reset at synchronization. This is a documentation clarification; runtime behavior is unchanged.
+- Validation:
+  - Documentation-only change; reviewed relevant sections and checked patch whitespace.
+
+## 2026-10-27
+
+### Validated the Phase 2 baseline and clarified US-3.1 implementation
+- Summary:
+  - Improved Phase 2 invariant failures to identify the affected bucket and field, including message-category totals, empty-observation rows, and forced synchronization traffic.
+  - Added regressions for a corrupted exported CSV trace and a corrupted communication total.
+  - Added explicit synchronization-policy metadata to Phase 2 run metrics and made integrated notebook validation require it.
+  - Added plain-language US-3.1 implementation notes describing the baseline flow, state timing, diagnostic interpretation, and how validation is performed.
+- Affected files:
+  - scripts/phase2_monitoring.py
+  - scripts/test_phase2_monitoring.py
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - Phase_3_User_Stories.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - More actionable validation errors make it easier to distinguish and diagnose baseline failures before clustering results are interpreted.
+  - Valid monitoring behavior and communication counts are unchanged; run metrics gain additive synchronization-policy metadata, and invalid traces now report specific bucket/field details. The user story now explains how the existing Phase 2 implementation meets the acceptance criteria for readers unfamiliar with the project.
+- Validation:
+  - `python -m unittest scripts.test_phase2_monitoring -v` passed all 31 tests.
+
 ## 2026-10-21
 
 ### 5. Adopted Approach A for matched Phase 3 comparisons

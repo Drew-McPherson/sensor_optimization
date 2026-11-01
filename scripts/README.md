@@ -276,3 +276,81 @@ Stage 4 checks:
 7. `phase2_sensor_reduction_analysis.csv` schema and minimum-metric checks.
 8. Cross-artifact consistency checks between exported rows and metrics totals.
 9. Public-schema enforcement that prevents internal control fields from appearing in exported row outputs.
+
+## Phase 3 Sensor History
+
+`scripts/build_phase3_temperature_clustering.ipynb` is the Phase 3 implementation
+notebook, adapted from the Phase 2 workflow. Its `SensorHistoryTracker.step()`
+code cell processes one complete sensor-reading row:
+
+1. The first row with observations initializes histories to zero and establishes
+   sensor references with synchronization ID 1.
+2. Later valid observations update history against the reference and reference
+   synchronization ID active on row entry. If synchronization completes on the
+   row, the history snapshot includes that row's update against the old
+   reference; the newly synchronized reference applies on the next row.
+3. Missing observations preserve history without discounting it. On departure,
+   the audit still records the reference active at row entry; later offline
+   rows have no active reference. A returning sensor establishes a fresh
+   reference at synchronization, and history updates resume on the next valid
+   row.
+4. A row with no observations does not update history or complete synchronization;
+   pending synchronization causes are retained.
+
+Pass explicit monitoring synchronization causes using the
+`synchronization_causes` argument. Membership changes and initialization are
+detected by the tracker. The notebook compares synchronization rows to the
+matched Phase 2 trace and writes two outputs:
+
+- `artifacts/phase3_sensor_history_events.csv` stores synchronization IDs,
+  causes, the exact raw history snapshots supplied to clustering, the eligible
+  sensor set, scalar history magnitudes, maximum magnitude, normalized history
+  snapshot, normalization status, and references used/established. Its
+  `alpha_clustering_evaluations` JSON column retains separate evaluations for
+  all 19 alpha candidates, including candidate partitions and qualities,
+  merge decisions and partner scores, and the final assignments.
+- `artifacts/phase3_sensor_history_trace.csv` stores one normalized audit row
+  for every sensor in every input bucket, including missing sensors and
+  ordinary non-synchronization rows. It includes bucket/time, observation,
+  entry reference and its synchronization ID, pre-history, signed deviation,
+  post-history, update status, skip reason, and any synchronization completed
+  on that bucket.
+
+The trace is the per-update audit trail; event snapshots remain the exact
+clustering inputs. At each completed synchronization, the notebook normalizes
+only selected-cohort sensors that are online with valid observations. An empty
+eligible set does not create a clustering event. If the set is nonempty but all
+histories are zero, the event is marked as a no-information fallback and has
+one singleton cluster per eligible sensor. Otherwise, each signed raw history
+is divided by the maximum absolute eligible history.
+
+The notebook creates in-memory inputs for each alpha in the configured sweep,
+all referencing the same immutable event normalization snapshot. US-3.4
+evaluates each input using signed cluster quality
+`q = abs(sum(normalized_history)) / cluster_size + alpha * cluster_size`
+and partition quality `Q = max(q)`. It starts with singletons, repeatedly
+merges the worst-quality cluster with the partner minimizing merged-cluster
+quality, retains each candidate, and stops at two clusters. It selects the
+minimum-quality retained candidate, not necessarily the last one.
+
+Clusters and partitions use sorted string-ID tuples. Exact ties for worst
+cluster or partner choose the lexicographically smallest cluster; ties among
+candidate partitions choose the earliest retained candidate (more clusters).
+Comparisons use unrounded values, without near-equality tolerances. One- and
+two-sensor events require no merges. All-zero fallback events retain singletons
+without running merges or manufacturing normalized values; fallback singleton
+quality is alpha. Cluster assignment indices are zero-based and local to an
+event/alpha evaluation.
+
+No separate output file is added. FMIC/SMIC allowances, coordinators, activation
+of partitions in monitoring, and communication comparisons remain later work.
+
+The regression tests execute the tagged implementation and runner cells from
+the notebook and cover hand-calculated history values, signed deviations,
+sync-row timing, reference IDs, updated/skipped audit records, eligible-set
+normalization, empty/all-zero cases, offline exclusion, and shared alpha inputs.
+Clustering tests additionally cover hand-calculated candidate/merge sequences,
+deterministic ties, stopping at two clusters, and serialized audit replay.
+Run them with:
+
+`python -m unittest scripts.test_phase3_history -v`

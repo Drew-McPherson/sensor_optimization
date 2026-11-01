@@ -238,16 +238,17 @@ Notebook sections (cells):
 Phase 3 uses the temperature streams as scalar node streams and preserves the same global temperature threshold objective used for the comparable Phase 2 run.
 
 Source-alignment checkpoints:
-1. History vectors follow Section 1.4 of `140516editor Book Chapter (Last Version).pdf`: initialize history at zero and repeatedly discount older history while adding the signed change from the current synchronization reference. Operationally, for a valid reading between synchronization times, update the scalar history as `h_i <- 0.5 * h_i + (v_i(t) - v_i(t_j))`, where `t_j` is the active synchronization reference. Use accumulated history to form the partition at synchronization and retain it afterward; do not reset histories at each resynchronization. Subsequent valid updates use the newly synchronized reference.
+1. History vectors follow Section 1.4 of `140516editor Book Chapter (Last Version).pdf`: initialize history at zero and repeatedly discount older history while adding the signed change from the active synchronization reference. For each valid observation after the reference row and through the next synchronization row inclusive (`t_j < t <= t_{j+1}`), update the scalar history as `h_i <- 0.5 * h_i + (v_i(t) - v_i(t_j))`. The reference-establishing row does not create an update. On the next synchronization row, first update against the still-active reference, use that result to form the partition, then install the new reference for subsequent rows. Retain history; do not reset it at resynchronization.
 2. Do not replace the synchronization-reference difference with `v_i(t) - v_i(t-1)`.
-3. Before clustering, normalize the history-vector set by the magnitude of the longest history vector when that magnitude is greater than zero, matching the source normalization that places alpha on a convenient [0,1] scale.
-4. If all history magnitudes are zero, record that no informative history-based partition exists and use a deterministic no-clustering/singleton fallback for that clustering event rather than inventing an arbitrary partition.
-5. Partition quality must implement the source cluster-quality and partition-quality definitions from Section 1.4 exactly, including the alpha-dependent cluster-size term.
-6. The incremental merge procedure must follow Algorithm 1.4.1: begin with singleton clusters, repeatedly select the current worst-quality cluster, merge it with the partner producing the smallest merged-cluster quality, retain each candidate partition, and select the retained partition with minimum partition quality.
-7. FMIC must use the source first-moment weighting/allowance calculation.
-8. SMIC must use the source second-moment weighting/allowance calculation based on the first moment plus the conservative second-moment term.
-9. Coordinator allowance must be derived from member-node allowances using the source rule rather than an independently invented threshold.
-10. Formula-level unit tests must compare implementation outputs for history, normalization, cluster quality, merge selection, FMIC/SMIC weights, node allowances, and coordinator allowances against hand-calculated examples.
+3. For completed synchronization event `j`, define eligible sensors `E_j` as selected-cohort sensors online at `t_j` with valid observations participating in that synchronization. The resulting partition contains exactly `E_j`. In the scalar temperature experiment, normalize the eligible history set by `H_j = max_{i in E_j} |h_i(t_j)|` when `H_j > 0`, preserving signs. Multivariate normalization implementation and testing are out of scope for the current Phase 3 experiment.
+4. If `E_j` is empty, do not normalize, create a fallback partition, or record a completed clustering event; synchronization remains incomplete until observations are available. If `E_j` is nonempty and all history magnitudes are zero, record the no-information condition and use exactly one singleton cluster per eligible sensor, marked `partition_basis = all_zero_history_fallback`; do not run greedy merging.
+5. Create one event-level normalization snapshot per completed synchronization, shared across all alpha candidates. Store each candidate's alpha-specific partition, cluster assignments, quality, and counts in a separate evaluation linked to that snapshot.
+6. Partition quality must implement the source cluster-quality and partition-quality definitions from Section 1.4 exactly, including the alpha-dependent cluster-size term.
+7. The incremental merge procedure must follow Algorithm 1.4.1: begin with singleton clusters, repeatedly select the current worst-quality cluster, merge it with the partner producing the smallest merged-cluster quality, retain each candidate partition, and stop at exactly two clusters for `n >= 2`. Select the retained partition with minimum partition quality; never generate a one-cluster candidate when `n >= 2`. A single eligible sensor is already its only candidate. Project tie rules use lexicographically sorted string-ID clusters for equal-quality worst clusters/partners and the earliest retained candidate for equal-quality partitions, comparing unrounded values without near-equality tolerances.
+8. FMIC must use the source first-moment weighting/allowance calculation.
+9. SMIC must use the source second-moment weighting/allowance calculation based on the first moment plus the conservative second-moment term.
+10. Coordinator allowance must be derived from member-node allowances using the source rule rather than an independently invented threshold.
+11. Formula-level unit tests must compare implementation outputs for history, normalization, cluster quality, merge selection, FMIC/SMIC weights, node allowances, and coordinator allowances against hand-calculated examples.
 
 ### 6.9 Phase 3 Monitoring And Membership Policies
 #### Approach A — matched fixed-cohort comparison
@@ -271,10 +272,11 @@ Source-alignment checkpoints:
 #### Event-based clustering lifecycle and coordinators
 1. Cluster at initial synchronization and recluster at every later completed resynchronization, including monitoring-triggered, scheduled negative-margin, and observed-contributor-change synchronization. There is no periodic clustering schedule; a cluster check alone does not trigger reclustering.
 2. Each clustering event records the synchronization event/cause, histories used, partition, coordinator assignments, and activation row. Updated partitions, coordinators, references, and allowances apply starting on the next row.
-3. Initialize histories at zero at their required initial starting point. Retain accumulated histories across subsequent synchronizations; missing readings create no synthetic history update, and return requires re-entry synchronization before history updates resume.
-4. All-zero histories use the deterministic singleton fallback, including at initialization. No observation-dependent synchronization or fabricated cluster/coordinator assignment is completed when there are zero valid observations.
-5. At clustering, choose each cluster's highest-ID available member as coordinator; a singleton coordinates itself. Document deterministic ID ordering, including numeric versus string representation, and record old/new assignments when they change.
-6. Cluster formation/reassignment information is included with new thresholds in normal synchronization updates, with zero additional standalone formation/reassignment transmissions. Transmission types and event causes are separate accounting views, not additive duplicate totals.
+3. Initialize each sensor's accumulated history to zero at the first completed synchronization. On later eligible rows, update history using the reference active on row entry before clustering or synchronizing. A completed synchronization uses the updated history for its partition, then establishes references that become active on the next row; it does not reset histories. Missing/offline rows leave history unchanged. A returning sensor retains its accumulated history but does not update it from a stale reference; its return synchronization establishes a current reference before updates resume on the next eligible row. Zero-observation rows do not update history or complete clustering.
+4. Assign a monotonically increasing synchronization ID to each completed event and retain it with every reference it establishes. Export both event snapshots and a normalized long-form row-by-sensor audit for every input bucket, including missing sensors and rows without synchronization. The trace must include observed value, entry reference and its synchronization ID, pre-history, signed deviation, post-history, update status, and a reason when skipped. Event snapshots alone do not provide the required update-level audit; they remain the exact clustering inputs.
+5. All-zero histories use the deterministic singleton fallback, including at initialization. No observation-dependent synchronization or fabricated cluster/coordinator assignment is completed when there are zero valid observations.
+6. At clustering, choose each cluster's highest-ID available member as coordinator; a singleton coordinates itself. Document deterministic ID ordering, including numeric versus string representation, and record old/new assignments when they change.
+7. Cluster formation/reassignment information is included with new thresholds in normal synchronization updates, with zero additional standalone formation/reassignment transmissions. Transmission types and event causes are separate accounting views, not additive duplicate totals.
 
 #### Cluster monitoring correctness
 1. A node-level warming/local-constraint violation must always be detected and logged even when later cluster cancellation prevents escalation to the root.
@@ -441,21 +443,23 @@ Phase 3 may proceed to full-data comparison only when:
 
 ### 9.2 Phase 3
 1. Phase 2 comparator passes correctness tests before Phase 3 comparison.
-2. history update uses the active synchronization reference, not prior-minute difference.
-3. no missing reading is silently interpreted as zero change.
-4. history normalization and alpha handling match the source method.
-5. partition quality and greedy merge choices match hand calculations on small examples.
-6. FMIC and SMIC allowance calculations are tested separately.
-7. node trigger, coordinator check, and root escalation are distinguishable in outputs.
-8. local warming detection remains observable even when cluster cancellation prevents root escalation.
-9. global violations are identical to matched reference calculations under the same availability assumptions.
-10. matched algorithm totals and overlapping cause-attribution totals are not pooled or presented as separate fixed/dynamic experiments.
-11. all Phase 3 message categories reconcile to the overall total.
-12. alpha sensitivity outputs preserve every tested alpha, not just the best-performing setting.
-13. clustering occurs at initialization and every completed resynchronization, never on a timer, with new state active on the next row.
-14. accumulated histories survive resynchronization, and coordinator selection follows highest available sensor ID.
-15. zero-observation global state remains undefined, and offline sensors generate no traffic because availability is known without communication.
-16. bundled cluster/threshold updates are counted once; cause-attribution views reconcile without duplicate traffic.
+2. The US-3.2 implementation cells in `scripts/build_phase3_temperature_clustering.ipynb` pass hand-calculated tests for initialization, active-reference updates, synchronization-row ordering, multiple resynchronizations, offline/return handling, and zero-observation rows, including the minimum `0.40 / 20.0 / 20.2, 20.5, 20.3` example.
+3. History updates use the active synchronization reference, not prior-minute difference; signed positive, negative, and alternating deviations remain signed, and no missing reading is silently interpreted as zero change or discounted in the absence of an observation.
+4. `artifacts/phase3_sensor_history_trace.csv` contains one record per sensor per input bucket, with enough state to reproduce each update and explicit reasons for skipped updates; synchronization and reference IDs link row audit records to the events that established their references.
+5. Normalization uses exactly the selected-cohort sensors online with valid observations at the completed synchronization; the resulting partition contains the same set. Empty eligibility defers clustering without a fallback, while nonempty all-zero eligibility produces the marked singleton fallback.
+6. One event-level normalized history snapshot is shared across alpha candidates; each candidate's partition and quality results are stored separately and preserve the complete alpha sweep.
+7. Partition quality and greedy merge choices match hand calculations on small examples, including signed cancellation, all retained candidates, stopping at two clusters, earlier-candidate selection, deterministic ties, empty/singleton/pair/all-zero cases, and event/alpha audit replay. The existing event CSV retains separate alpha evaluations in `alpha_clustering_evaluations`; no new output file is needed.
+8. FMIC and SMIC allowance calculations are tested separately.
+9. Node trigger, coordinator check, and root escalation are distinguishable in outputs.
+10. Local warming detection remains observable even when cluster cancellation prevents root escalation.
+11. Global violations are identical to matched reference calculations under the same availability assumptions.
+12. Matched algorithm totals and overlapping cause-attribution totals are not pooled or presented as separate fixed/dynamic experiments.
+13. All Phase 3 message categories reconcile to the overall total.
+14. Alpha sensitivity outputs preserve every tested alpha, not just the best-performing setting.
+15. Clustering occurs at initialization and every completed resynchronization, never on a timer, with new state active on the next row.
+16. Accumulated histories survive resynchronization, and coordinator selection follows highest available sensor ID.
+17. Zero-observation global state remains undefined, and offline sensors generate no traffic because availability is known without communication.
+18. Bundled cluster/threshold updates are counted once; cause-attribution views reconcile without duplicate traffic.
 
 ---
 
@@ -508,8 +512,8 @@ Do not claim this decomposition measures an availability-free clustering effect.
 ### Code And Execution
 1. scripts/build_phase1_temperature.py (existing).
 2. scripts/build_phase2_temperature_sensors.ipynb (required baseline implementation).
-3. Phase 3 FMIC implementation artifact (notebook/script; final filename must be recorded here when created).
-4. Phase 3 SMIC implementation artifact (may share a notebook with FMIC only if algorithm-specific validation and outputs remain separately auditable).
+3. scripts/build_phase3_temperature_clustering.ipynb (Phase 3 implementation notebook, adapted from the Phase 2 notebook; FMIC and SMIC implementation will be added here).
+4. scripts/test_phase3_history.py (hand-calculated regression harness that executes the US-3.2 implementation cells from the Phase 3 notebook).
 5. Synthetic correctness/unit-test artifact for Phase 2/FMIC/SMIC logic.
 
 ### Data Artifacts
@@ -517,7 +521,7 @@ Do not claim this decomposition measures an availability-free clustering effect.
 2. artifacts/phase1_average_statistics.csv.
 3. artifacts/phase2_temperature_sensors.csv.
 4. artifacts/phase2_temperature_metrics.json.
-5. Phase 3 row/cluster trace artifacts sufficient to reproduce cluster assignments, node/coordinator/root events, and message counts.
+5. artifacts/phase3_sensor_history_events.csv and artifacts/phase3_sensor_history_trace.csv, plus later Phase 3 row/cluster trace artifacts sufficient to reproduce history updates and snapshots, cluster assignments, node/coordinator/root events, and message counts.
 6. Phase 3 alpha sensitivity summary for FMIC and SMIC.
 7. Phase 3 matched Approach A comparison and availability cause-attribution summary.
 8. Phase 3 synthetic correctness test results.
