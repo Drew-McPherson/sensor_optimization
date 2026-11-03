@@ -432,7 +432,7 @@ Normal execution uses only alpha 0.10. No SMIC, alpha tuning, availability
 handling, full sensor-minute trace, or exhaustive merge-search export is added.
 
 The authoritative chapter is
-`Writing/Motivation/140516editor Book Chapter (Last Version).pdf`.
+[Clustering for Monitoring Distributed Data Streams](../Writing/Motivation/140516editor%20Book%20Chapter%20%28Last%20Version%29.pdf#page=14).
 Section 1.4, printed p.10 (PDF p.14), defines the arithmetic mean of discounted
 raw observations, not the signed clustering history:
 
@@ -448,6 +448,24 @@ delta_coordinator(cluster) = mean(member node allowances)
 Here `m` counts every post-initialization bucket, starting at t1 as in the
 source's vector set, not just synchronization events. Moments persist across
 synchronization. At initialization there are no post-initialization samples.
+Specifically, the source vector set is
+`V'_n(m) = {2^(-(m-i)) * v_n(t_i) : i=1,...,m}`. Summing that set gives the
+recurrence above algebraically; the divisor is `m`, not `sum(2^(-(m-i)))`.
+Thus this is not a weight-normalized EMA. Every post-t0 observation contributes,
+including synchronization rows. Before any such observation, zero means are a
+project initialization convention, not an arithmetic mean of an empty source set.
+
+The notebook's **First-moment provenance and recurrence** cell preserves the
+source location, derivation, and a three-observation hand table. For A readings
+`[2,4,6]`, the final discounted vector set is `[0.5,2,6]`, sum `8.5`, mean
+`8.5/3`; for B `[-4,2,3]` it is `[-1,1,3]`, sum `3`, mean `1`.
+`FirstMomentTests.test_discounted_arithmetic_mean_is_not_history_or_ema`
+checks the explicit vectors, discounted sums, sample counts, and means at each
+step (mean tolerance 1e-12). The existing synchronization-persistence test
+independently checks that samples and accumulated state survive synchronization.
+Clustering instead uses reference-relative `h(t)=0.5*h(t-1)+(v(t)-reference)`;
+that state is never substituted for `mu_n`.
+
 If all weights are zero, use `w_n=1` for every sensor: this is an explicitly
 labeled **project fallback**, not a source-defined formula. Individual zero
 weights otherwise remain zero; no epsilon, floors, or tolerance reclassification
@@ -490,7 +508,9 @@ Outputs:
   and comparisons against matched Phase 2 and centralized transmissions.
 
 FMIC correctness uses the root-known global state versus centralized truth;
-this is not Phase 2's historical same-row-resynchronization diagnostic predictor.
+`correctness_status` is `passed` only when both `false_safe_count` and
+`false_violated_count` are zero. Either mismatch direction makes it `failed`.
+This is not Phase 2's historical same-row-resynchronization diagnostic predictor.
 The primary communication comparison uses identical data and transmission
 units, but explicitly different monitoring architectures and state policies.
 

@@ -6,6 +6,41 @@ This file tracks implemented changes in this repository.
 
 ## 2026-11-03
 
+### Documented and hand-validated the source first-moment recurrence
+- Summary:
+  - Added a direct chapter PDF reference (section 1.4, printed p.10/PDF p.14), explicit discounted vector set, algebraic sum recurrence, and observation-count divisor beside the notebook implementation.
+  - Added a worked two-sensor, three-observation table; documented raw readings versus reference-relative clustering history, post-initialization sampling, and persistence across synchronization.
+  - Strengthened the existing moment-recurrence test to verify hand-listed discounted vectors, intermediate sums, observation counts, and signed arithmetic means, independently of allocation formulas.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_monitoring.py
+  - scripts/README.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Preserves the source-to-code derivation needed for FMIC interpretation and future SMIC work. Explicitly distinguishes arithmetic mean of discounted observations from an EMA and from signed clustering history.
+  - Documentation and regression coverage only; numerical calculations, monitoring, and output schemas are unchanged.
+- Validation:
+  - Verified the discounted vector-set definition directly against the original PDF page 14.
+  - All 35 focused FMIC/history/clustering tests passed, including the expanded hand-calculated recurrence and existing synchronization-persistence tests.
+  - Executable-AST comparison confirmed only documentation changed in the notebook for this request, preserving the previously requested symmetric-status fix.
+
+### Made FMIC summary correctness validation symmetric
+- Summary:
+  - Requires both `false_safe_count == 0` and `false_violated_count == 0` before reporting `correctness_status = passed`.
+  - Adds regression coverage for all four zero/nonzero count combinations and a synthetic missed violated-to-safe transition.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_monitoring.py
+  - scripts/README.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes the summary decision reflect the approved two-sided threshold-monitoring policy. Monitoring, message accounting, and the existing immediate false-safe exception are unchanged.
+  - The current production run has zero mismatches in both directions, so its status and result values are expected to remain unchanged.
+- Validation:
+  - Both new regressions reproduced the prior false pass before the fix; all 35 focused FMIC/history/clustering tests now pass.
+  - Every notebook code cell compiled and the full 19,984-bucket run completed successfully with both mismatch counts zero and status `passed`.
+  - SHA-256 checks confirmed the regenerated FMIC summary/events and matched Phase 2 baseline remain byte-for-byte unchanged.
+
 ### Consolidated Phase 3 core into one notebook
 - Summary:
   - Moved the unchanged clustering/history/input-validation and FMIC allocation/monitoring implementations into labeled, tagged notebook cells.
