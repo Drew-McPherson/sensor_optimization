@@ -77,6 +77,25 @@ conflicting examples, and `qc_phase1_unmatched_records.csv` with every exact
 value-and-multiplicity mismatch between the aggregate and timestamped sources.
 The unmatched export is intentionally exhaustive and can be large.
 
+## Phase 3A FMIC results
+
+`phase3a_fmic_events.csv` contains one compact selected clustering/allocation
+row per FMIC root synchronization. `phase3a_fmic_summary.json` records actual
+transmission categories, correctness, provenance hashes, and the matched Phase 2
+comparison. Generate both by executing the Phase 3 notebook.
+All Phase 3 core implementation now resides in that notebook; separate Python
+test files validate its tagged definition cells without running production.
+
+The US-3.19 run at alpha 0.10 processes 19,984 buckets with 11,922 messages,
+293 root synchronizations, and zero false-safe or false-violated buckets.
+The matched Phase 2 baseline and historical Phase 2-scheduled clustering-event
+artifact are preserved, not replaced by FMIC. Full sensor-minute traces are
+not generated.
+
+See [FMIC usage and methodology](../scripts/README.md#end-to-end-fmic-us-319)
+for discounted first moments, the labeled project zero-weight fallback,
+both-sides distance monitoring, and separate-root communication accounting.
+
 ## Notes
 1. Files in this folder are generated artifacts and may be overwritten between runs.
 2. In a source-only GitHub repository, keep this README tracked but generate the artifact files locally instead of committing them.

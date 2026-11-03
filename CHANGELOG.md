@@ -6,6 +6,60 @@ This file tracks implemented changes in this repository.
 
 ## 2026-11-03
 
+### Consolidated Phase 3 core into one notebook
+- Summary:
+  - Moved the unchanged clustering/history/input-validation and FMIC allocation/monitoring implementations into labeled, tagged notebook cells.
+  - Kept automated tests separate and updated FMIC tests to load the tagged notebook definitions, using the existing history-test loader.
+  - Removed the two redundant Phase 3 implementation modules; retained shared functions inside the notebook for future SMIC reuse.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/phase3_clustering.py (removed)
+  - scripts/phase3_monitoring.py (removed)
+  - scripts/test_phase3_monitoring.py
+  - scripts/README.md
+  - artifacts/README.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes the complete Phase 3 implementation reviewable in one notebook without changing the algorithms, transmission accounting, experiment contract, or output schemas.
+  - Tests remain independently runnable; no alternative or duplicate core implementation is retained.
+- Validation:
+  - All 88 focused Phase 1/QC/Phase 2/Phase 3/FMIC regression tests passed, including a new assertion that the core definitions are present in notebook cells and the removed modules are not required.
+  - Every notebook code cell compiled and executed successfully in a fresh kernel after deleting the external modules.
+  - SHA-256 comparisons confirmed FMIC events, FMIC summary, and the matched Phase 2 baseline are byte-for-byte unchanged: 11,922 messages, 293 root synchronizations, and zero false-safe/false-violated buckets.
+  - Execution produced only the previously observed non-blocking Windows Jupyter event-loop warning.
+
+### Implemented and validated end-to-end Phase 3A FMIC (US-3.19)
+- Summary:
+  - Mechanically extracted the existing history, normalization, greedy clustering, and stable-input validation definitions into an importable shared module, preserving their mathematics and legacy helper regression behavior.
+  - Implemented independent FMIC initialization, fixed-reference node monitoring, signed coordinator cancellation, escalation, root synchronization/reclustering, and persistent history.
+  - Verified the first-moment definition against the authoritative chapter, printed p.10/PDF p.14: arithmetic mean of age-discounted raw observations, kept separate from clustering history. Implements first-moment-only weights, node/coordinator allowances, and the explicitly labeled project all-zero-weight fallback.
+  - Implements the approved separate-root transmission model, absolute distance-to-boundary monitoring on both sides, inclusive trigger boundaries, deterministic simultaneous-trigger handling, and blocking false-safe validation.
+  - Wired normal notebook execution to FMIC alpha 0.10 without replaying Phase 2 or overwriting its matched baseline; exports only compact FMIC events and summary.
+- Affected files:
+  - scripts/phase3_clustering.py
+  - scripts/phase3_monitoring.py
+  - scripts/test_phase3_monitoring.py
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/README.md
+  - artifacts/README.md
+  - artifacts/phase3a_fmic_events.csv (generated)
+  - artifacts/phase3a_fmic_summary.json (generated)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Completes FMIC's own monitoring lifecycle while retaining the fixed cohort, interval, threshold, validated clustering foundation, and matched Phase 2 comparison.
+  - The root retains the last synchronized threshold state; centralized truth validates each bucket but never drives communication. This is explicitly distinct from Phase 2's same-row-resynchronization diagnostic definition.
+  - No Phase 1/2 changes, SMIC, alpha sweep/tuning, dynamic availability, or exhaustive production traces are introduced.
+- Validation and results:
+  - Formula, allowance reconciliation, zero-weight fallback, boundary, cancellation, simultaneous-trigger, history/moment persistence, communication hand-count, randomized centralized-truth, and production-integration tests pass alongside the existing Phase 2/3 regressions.
+  - Full notebook execution completed successfully for all 19,984 buckets; all 1,999 centralized violations were recognized with zero false-safe and zero false-violated buckets.
+  - FMIC used 11,922 messages: node triggers 2,564; cluster requests 1,832; cluster responses 1,832; coordinator escalations 420; root requests/responses/updates 1,758 each. Categories reconcile exactly.
+  - Recorded 293 root synchronizations (one initialization, 292 monitoring-triggered), 3,522 coordinator checks, and 420 escalations; multiple same-bucket escalations share one root synchronization.
+  - Message reduction is 68.697981% versus the 38,087-message matched Phase 2 baseline, and 90.057046% versus 119,904 centralized sensor transmissions. No general superiority claim is made.
+  - Independent replay of every raw-input bucket verified exported histories, moments, weights, allowances, runtime event schedule, seven transmission categories, and root-known states without invoking the FMIC monitor.
+  - SHA-256 checks confirmed aligned Phase 1 input, statistics, experiment config, matched Phase 2 baseline, and historical clustering-event artifact remain unchanged.
+  - All 87 focused Phase 1/QC/Phase 2/Phase 3/FMIC regression tests passed. New modules passed syntax checks; FMIC runtime/tests have no Pylance diagnostics. Full notebook execution emitted only a non-blocking Windows Jupyter event-loop warning.
+  - Final outputs are compact: 293 event rows (435,851 bytes) and a 3,129-byte summary JSON; no full sensor-minute trace was generated.
+
 ### Excluded the temperature aggregate from Phase 1 source discovery
 - Summary:
   - Explicitly excludes `temperature_raw.csv` by case-insensitive filename before applying the source-file limit, preserving timestamped source ordering and all transformation/deduplication logic.

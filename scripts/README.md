@@ -390,14 +390,11 @@ UTC, inclusive. The input gate requires exactly 19,984 rows, matching endpoints,
 unique timestamps in their original strictly increasing order, exact 60-second
 timestamp and epoch steps, and finite readings for all six sensors. Invalid
 input fails explicitly; it is not sorted, imputed, or dynamically adjusted.
-The compact validation summary is printed before the existing Phase 2 monitor
-runs on the exact matched cohort, interval, and authoritative P90. The Phase 2
-trace is validated in memory but is not written as a second large row artifact.
-Its compact matched result is written to
-`artifacts/phase3a_phase2_baseline.json`, distinct from the historical full-data
-Phase 2 output.
+US-3.18 produced the matched `artifacts/phase3a_phase2_baseline.json`.
+US-3.19 reads and validates that existing baseline for comparison; normal
+notebook execution no longer runs Phase 2 or overwrites the baseline.
 
-At initialization and each completed Phase 2 synchronization, histories update
+At initialization and each completed FMIC synchronization, histories update
 against the reference active on row entry, retain their accumulated value across
 synchronizations, and use signed deviations. Normalization preserves signs and
 uses the maximum history magnitude. The all-zero singleton fallback and the
@@ -405,12 +402,13 @@ source-aligned quality/greedy-selection rules remain unchanged. The full interna
 candidate search is calculated as needed, but normal outputs retain only the
 selected result.
 
-`artifacts/phase3_sensor_history_events.csv` contains one row per clustering
+The preserved `artifacts/phase3_sensor_history_events.csv` contains one row per clustering
 event at the baseline `alpha=0.10`, including event/time/cause, raw and
 normalized histories, fallback status, selected partition and quality, cluster
 count, coordinator assignments, and authoritative threshold provenance. To run the full 19-value alpha
 sweep for tuning, pass `alpha_values=PHASE3_ALPHA_VALUES` to
-`build_phase3a_history_events`. Coordinator reporting currently chooses the
+the legacy `build_phase3a_history_events` helper (not FMIC's runtime schedule).
+Coordinator reporting chooses the
 lexicographically greatest cohort label in each cluster as a deterministic
 descriptive convention. Normal runs do not generate
 `artifacts/phase3_sensor_history_trace.csv` or any sensor-by-minute history
@@ -419,3 +417,89 @@ trace. Focused tests retain the detailed mathematical and history checks.
 Run the Phase 3 regression suite with:
 
 `python -m unittest scripts.test_phase3_history -v`
+
+### End-to-end FMIC (US-3.19)
+
+Run all cells in `scripts/build_phase3_temperature_clustering.ipynb`.
+All Phase 3 history/normalization/clustering/input definitions and the independent
+FMIC allocation/monitoring engine live in clearly labeled cells in this one
+notebook. The `phase3-history-implementation` and
+`phase3-fmic-implementation` tags let separate automated tests execute those
+definitions without running the production experiment. The former external
+Phase 3 implementation modules have been removed; no duplicated core is kept.
+The existing Phase 2 dependency remains for legacy helper regression coverage.
+Normal execution uses only alpha 0.10. No SMIC, alpha tuning, availability
+handling, full sensor-minute trace, or exhaustive merge-search export is added.
+
+The authoritative chapter is
+`Writing/Motivation/140516editor Book Chapter (Last Version).pdf`.
+Section 1.4, printed p.10 (PDF p.14), defines the arithmetic mean of discounted
+raw observations, not the signed clustering history:
+
+```
+S_n(m) = 0.5 * S_n(m-1) + v_n(t_m)
+mu_n(m) = S_n(m) / m
+W_n = abs(mu_n)                  # FMIC: first moment only (section 1.5.2)
+w_n = N * W_n / sum(W)
+delta_node(n) = w_n * delta_root
+delta_coordinator(cluster) = mean(member node allowances)
+```
+
+Here `m` counts every post-initialization bucket, starting at t1 as in the
+source's vector set, not just synchronization events. Moments persist across
+synchronization. At initialization there are no post-initialization samples.
+If all weights are zero, use `w_n=1` for every sensor: this is an explicitly
+labeled **project fallback**, not a source-defined formula. Individual zero
+weights otherwise remain zero; no epsilon, floors, or tolerance reclassification
+is used.
+
+Use `delta_root = abs(threshold - synchronized_mean)` and absolute local
+deviations; a coordinator takes the absolute value *after* averaging signed
+member deviations, preserving cancellation. Local/coordinator equality triggers
+checks (`>=`), matching the project's boundary convention. Root state is safe
+below P90 and violated at/above P90; distance monitoring works on either side.
+At exact P90, zero allowances cause checks on the following bucket. No Phase 2
+negative-margin forced synchronization schedule is imported. Centralized truth
+is a per-bucket validation oracle only, never a hidden communication trigger.
+A false-safe is blocking and raises before successful artifacts are written.
+
+Communication protocol:
+- Root is a separate component, consistent with the matched Phase 2 baseline;
+  coordinators remain sensors, chosen as the lexicographically highest member.
+- All triggering non-coordinators report their reading once. Each triggered
+  cluster is checked once per bucket; its coordinator requests/responses only
+  from peers not already reporting. The coordinator's own reading is free.
+- Every violating coordinator sends one alert to root. Multiple alerts in the
+  same bucket cause one root synchronization. Alerts deliberately carry no raw
+  readings, so root requests/retrieves all six sensor states, then sends one
+  bundled monitoring-state update per sensor. Requests and responses are
+  distinct transmissions; there is no self-transmission or hidden broadcast
+  discount. This is actual project transmission accounting, not the chapter's
+  sensor-as-root Appendix 2 broadcast approximation.
+- References, partition, weights, and allowances remain fixed until sync.
+  The synchronization row updates history against entry references before
+  installing new references for the following row.
+
+Outputs:
+- `artifacts/phase3a_fmic_events.csv`: one compact row per FMIC synchronization,
+  with history, normalization, selected partition/quality/coordinators,
+  first moments, weights, node/coordinator/root allowances, and threshold.
+- `artifacts/phase3a_fmic_summary.json`: configuration/input/baseline/event
+  hashes, seven message-category totals, synchronizations, triggers/checks,
+  cluster-size summaries, centralized violations, root-state correctness,
+  and comparisons against matched Phase 2 and centralized transmissions.
+
+FMIC correctness uses the root-known global state versus centralized truth;
+this is not Phase 2's historical same-row-resynchronization diagnostic predictor.
+The primary communication comparison uses identical data and transmission
+units, but explicitly different monitoring architectures and state policies.
+
+The validated baseline-alpha run uses 11,922 messages and 293 root
+synchronizations: 68.697981% fewer messages than the 38,087-message matched
+Phase 2 baseline. All 19,984 buckets pass centralized-state validation,
+including 1,999 violated buckets, with zero false-safe/false-violated rows.
+This is a result for the fixed experiment and alpha, not a general superiority
+claim or an alpha-tuning result.
+
+Tests:
+`python -B -m unittest scripts.test_phase3_monitoring scripts.test_phase3_history scripts.test_phase2_monitoring -q`
