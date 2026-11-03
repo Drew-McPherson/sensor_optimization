@@ -10,6 +10,21 @@ Build the Phase 1 (temperature-only) aligned dataset with explicit audit artifac
 1. Config: `config/transformation_defaults.yaml`
 2. Data directory: `Data/files_csv`
 
+Source discovery explicitly excludes the aggregate `temperature_raw.csv`
+(case-insensitive filename match) before applying `--limit-files`. Timestamped
+source CSVs retain their existing ordering; other discovery, parsing, first-wins
+deduplication, and alignment rules are unchanged. The QC CSV records
+`excluded_non_source_csv_filenames` as a JSON array, also exposed as a list in
+stdout JSON and recorded in the decisions log. Only excluded files actually
+present in the input directory are listed.
+
+The 2026-11-03 gate-enforced rerun processed 9,909,343 temperature rows,
+9,899,253 unique keys, and 10,090 excess duplicate rows (0.101823%, passing
+the 0.5% gate). Its 218,148-row aligned output was byte-for-byte identical
+to the previous aggregate-inclusive output: no timestamp, sensor availability,
+temperature, or average changes. The quantitative comparison is in
+`artifacts/phase1_duplicate_qc/phase1_source_exclusion_comparison.json`.
+
 ## Outputs
 1. `artifacts/raw_index.csv`
 2. `artifacts/aligned_phase1_temperature.csv`
@@ -52,6 +67,88 @@ Rules:
 1. The script logs JSON summary to stdout for machine review.
 2. The decisions log is append-only and records run metadata and gate results.
 3. Install dependency if needed: `pip install pyyaml`
+
+## Standalone Phase 1 Duplicate-Key QC
+
+Run `python scripts\qc_phase1_duplicate_keys.py` to investigate the raw temperature
+keys without running or changing the transformation pipeline. Defaults are
+repository-relative; optional arguments are `--data-dir`, `--out-dir`, and
+`--max-examples` (default 100, zero writes a header-only examples CSV).
+
+Outputs are isolated in `artifacts/phase1_duplicate_qc/`:
+- `qc_phase1_duplicate_summary.json`: counts, multiplicity distribution, exact
+  value agreement/conflicts, conflicting-key spreads, source-file statistics,
+  top 20 overlapping file pairs, and cross-file versus within-file attribution.
+- `qc_phase1_duplicate_conflicts.csv`: conflicting keys ordered by decreasing
+  spread, with per-file values/counts/first record numbers and the first value
+  that Phase 1 would retain.
+
+The stdlib-only script mirrors Phase 1 file ordering and schema validation,
+including `int(float(Time))`, unmodified device IDs, and exact
+`Sensor == "Temperature"`. Unlike transformation discovery, the standalone
+audit's default intentionally includes the aggregate so the original all-files
+investigation remains available. `rows_temperature` counts valid rows before
+deduplication; raw/invalid temperature counts are separate. A duplicate key is
+`(Time, DeviceId, Sensor)` and duplicate rows means occurrences beyond the first.
+Identical/conflicting percentages use all duplicate keys as the denominator.
+Conflicting-key difference is `max(Value) - min(Value)`; its mean is unweighted.
+The secondary `1e-9` spread count never changes exact conflict classification.
+
+Cross-file excess rows are `sum(distinct_files - 1)`; within-file excess rows
+are `sum(multiplicity - distinct_files)`. They sum to all duplicate rows.
+Keys that have both kinds are reported explicitly. "Primarily" means strictly
+more than 50%, reported separately by duplicate keys and excess rows; cross-file
+identical-key counts distinguish repeated observations from conflicting readings.
+
+Zero-denominator metrics are JSON null. Phase 1 accepts non-finite float values;
+this audit counts them explicitly, treats NaN as unequal, and reports/excludes
+undefined or overflowing spreads instead of emitting invalid JSON. Non-finite
+example values are strings. Temporary SQLite storage is cleaned on exit and
+bounds memory for multi-gigabyte inputs; allow several GB of temporary disk.
+Existing pipeline artifacts are never overwritten by the default command.
+
+Validation: `python -B -m unittest scripts.test_qc_phase1_duplicate_keys -q`.
+
+### Excluding the aggregate and checking record equivalence
+
+Run `python scripts\qc_phase1_duplicate_keys.py --exclude-temperature-raw`.
+The original all-files audit remains the default. The exclusion mode writes
+three files under `artifacts/phase1_duplicate_qc/excluding_temperature_raw/`
+without overwriting the original reports:
+- `qc_phase1_duplicate_summary.json`: all duplicate statistics after excluding
+  exactly `temperature_raw.csv`, conflicting-key spread bins and strict
+  exceedance counts at 1e-9, 1e-6, 0.001, 0.01, 0.05, and 0.1 degrees C,
+  gate evaluation, file inventory, and aggregate/source reconciliation.
+- `qc_phase1_duplicate_conflicts.csv`: the capped conflicting examples for the
+  reduced population, preserving exact parsed-float values and file provenance.
+- `qc_phase1_unmatched_records.csv`: all unmatched full-record groups in both
+  directions, with per-side counts, excess occurrences, aggregate record numbers,
+  and timestamped-source file provenance. It is not capped by `--max-examples`
+  and can be large; it is header-only when the record multisets match.
+
+The duplicate-row rate is `100 * excess duplicate rows / valid temperature rows`.
+The mode reads the gate from `config/transformation_defaults.yaml` (override
+with `--config`) using the project's existing PyYAML dependency. It reports both
+strictly below the configured threshold and Phase 1's actual rule:
+round the rate to six decimals, then compare with `<=`. Empty temperature
+populations have null gate results rather than being presented as passing.
+
+Reconciliation compares exact parsed `(Time, DeviceId, Sensor, Value)` occurrence
+counts between the aggregate and the union of timestamped source files; neither
+side is deduplicated and no tolerance is applied. Timestamp recognition uses
+Phase 1's filename parser. Other non-aggregate CSVs, if present, remain in the
+duplicate statistics but are listed separately and excluded from reconciliation.
+The inventory explicitly identifies all timestamped files. NaN never matches;
+same-sign infinities match and are counted as non-finite. Invalid temperature
+rows or invalid file schemas prevent a complete-equivalence conclusion.
+Unmatched provenance describes all observations in a record group, not an
+arbitrary choice of which identical occurrence is excess.
+
+The 2026-11-03 full run found 9,909,343 temperature rows and 10,090 excess
+duplicate rows (0.101823%, below the 0.5% gate). Exact record equivalence did
+not hold: 9,118,190 occurrences matched, with 791,153 unmatched occurrences
+in each direction. Inspect the JSON and unmatched CSV for details; matching
+total row counts or key coverage alone does not establish value equivalence.
 
 ## Phase 2 Notebook
 
@@ -277,80 +374,48 @@ Stage 4 checks:
 8. Cross-artifact consistency checks between exported rows and metrics totals.
 9. Public-schema enforcement that prevents internal control fields from appearing in exported row outputs.
 
-## Phase 3 Sensor History
+## Phase 3A Stable-Cohort History and Clustering
 
-`scripts/build_phase3_temperature_clustering.ipynb` is the Phase 3 implementation
-notebook, adapted from the Phase 2 workflow. Its `SensorHistoryTracker.step()`
-code cell processes one complete sensor-reading row:
+`config/phase3a_experiment_config.json` is the authoritative Phase 3A definition:
+it records the aligned input, fixed A/C/D/E/F/G cohort, inclusive interval,
+19,984 expected buckets, 60-second sampling, baseline alpha 0.10, boundary
+convention, and authoritative `phase3a_stable_cohort` P90. The P90 is generated
+by `scripts/build_phase1_temperature.py` using the Phase 1 linear-interpolation
+percentile rule and is retained at full precision. The historical
+`all_devices_observed` statistics row remains unchanged.
 
-1. The first row with observations initializes histories to zero and establishes
-   sensor references with synchronization ID 1.
-2. Later valid observations update history against the reference and reference
-   synchronization ID active on row entry. If synchronization completes on the
-   row, the history snapshot includes that row's update against the old
-   reference; the newly synchronized reference applies on the next row.
-3. Missing observations preserve history without discounting it. On departure,
-   the audit still records the reference active at row entry; later offline
-   rows have no active reference. A returning sensor establishes a fresh
-   reference at synchronization, and history updates resume on the next valid
-   row.
-4. A row with no observations does not update history or complete synchronization;
-   pending synchronization causes are retained.
+`scripts/build_phase3_temperature_clustering.ipynb` runs Phase 3A over the fixed
+cohort A, C, D, E, F, and G from 2022-02-24 18:50 UTC through 2022-03-10 15:53
+UTC, inclusive. The input gate requires exactly 19,984 rows, matching endpoints,
+unique timestamps in their original strictly increasing order, exact 60-second
+timestamp and epoch steps, and finite readings for all six sensors. Invalid
+input fails explicitly; it is not sorted, imputed, or dynamically adjusted.
+The compact validation summary is printed before the existing Phase 2 monitor
+runs on the exact matched cohort, interval, and authoritative P90. The Phase 2
+trace is validated in memory but is not written as a second large row artifact.
+Its compact matched result is written to
+`artifacts/phase3a_phase2_baseline.json`, distinct from the historical full-data
+Phase 2 output.
 
-Pass explicit monitoring synchronization causes using the
-`synchronization_causes` argument. Membership changes and initialization are
-detected by the tracker. The notebook compares synchronization rows to the
-matched Phase 2 trace and writes two outputs:
+At initialization and each completed Phase 2 synchronization, histories update
+against the reference active on row entry, retain their accumulated value across
+synchronizations, and use signed deviations. Normalization preserves signs and
+uses the maximum history magnitude. The all-zero singleton fallback and the
+source-aligned quality/greedy-selection rules remain unchanged. The full internal
+candidate search is calculated as needed, but normal outputs retain only the
+selected result.
 
-- `artifacts/phase3_sensor_history_events.csv` stores synchronization IDs,
-  causes, the exact raw history snapshots supplied to clustering, the eligible
-  sensor set, scalar history magnitudes, maximum magnitude, normalized history
-  snapshot, normalization status, and references used/established. Its
-  `alpha_clustering_evaluations` JSON column retains separate evaluations for
-  all 19 alpha candidates, including candidate partitions and qualities,
-  merge decisions and partner scores, and the final assignments.
-- `artifacts/phase3_sensor_history_trace.csv` stores one normalized audit row
-  for every sensor in every input bucket, including missing sensors and
-  ordinary non-synchronization rows. It includes bucket/time, observation,
-  entry reference and its synchronization ID, pre-history, signed deviation,
-  post-history, update status, skip reason, and any synchronization completed
-  on that bucket.
+`artifacts/phase3_sensor_history_events.csv` contains one row per clustering
+event at the baseline `alpha=0.10`, including event/time/cause, raw and
+normalized histories, fallback status, selected partition and quality, cluster
+count, coordinator assignments, and authoritative threshold provenance. To run the full 19-value alpha
+sweep for tuning, pass `alpha_values=PHASE3_ALPHA_VALUES` to
+`build_phase3a_history_events`. Coordinator reporting currently chooses the
+lexicographically greatest cohort label in each cluster as a deterministic
+descriptive convention. Normal runs do not generate
+`artifacts/phase3_sensor_history_trace.csv` or any sensor-by-minute history
+trace. Focused tests retain the detailed mathematical and history checks.
 
-The trace is the per-update audit trail; event snapshots remain the exact
-clustering inputs. At each completed synchronization, the notebook normalizes
-only selected-cohort sensors that are online with valid observations. An empty
-eligible set does not create a clustering event. If the set is nonempty but all
-histories are zero, the event is marked as a no-information fallback and has
-one singleton cluster per eligible sensor. Otherwise, each signed raw history
-is divided by the maximum absolute eligible history.
-
-The notebook creates in-memory inputs for each alpha in the configured sweep,
-all referencing the same immutable event normalization snapshot. US-3.4
-evaluates each input using signed cluster quality
-`q = abs(sum(normalized_history)) / cluster_size + alpha * cluster_size`
-and partition quality `Q = max(q)`. It starts with singletons, repeatedly
-merges the worst-quality cluster with the partner minimizing merged-cluster
-quality, retains each candidate, and stops at two clusters. It selects the
-minimum-quality retained candidate, not necessarily the last one.
-
-Clusters and partitions use sorted string-ID tuples. Exact ties for worst
-cluster or partner choose the lexicographically smallest cluster; ties among
-candidate partitions choose the earliest retained candidate (more clusters).
-Comparisons use unrounded values, without near-equality tolerances. One- and
-two-sensor events require no merges. All-zero fallback events retain singletons
-without running merges or manufacturing normalized values; fallback singleton
-quality is alpha. Cluster assignment indices are zero-based and local to an
-event/alpha evaluation.
-
-No separate output file is added. FMIC/SMIC allowances, coordinators, activation
-of partitions in monitoring, and communication comparisons remain later work.
-
-The regression tests execute the tagged implementation and runner cells from
-the notebook and cover hand-calculated history values, signed deviations,
-sync-row timing, reference IDs, updated/skipped audit records, eligible-set
-normalization, empty/all-zero cases, offline exclusion, and shared alpha inputs.
-Clustering tests additionally cover hand-calculated candidate/merge sequences,
-deterministic ties, stopping at two clusters, and serialized audit replay.
-Run them with:
+Run the Phase 3 regression suite with:
 
 `python -m unittest scripts.test_phase3_history -v`

@@ -28,7 +28,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-
 # -----------------------------------------------------------------------------
 # Utility helpers
 # -----------------------------------------------------------------------------
@@ -239,7 +238,9 @@ def _load_yaml_subset(path: Path) -> Dict[str, Any]:
                             if isinstance(nested_value, dict):
                                 item_value.update(nested_value)
                             else:
-                                raise ValueError(f"List item mapping expected near: {raw_line}")
+                                raise ValueError(
+                                    f"List item mapping expected near: {raw_line}"
+                                )
                         else:
                             if isinstance(nested_value, dict):
                                 item_value = {"value": item_value, **nested_value}
@@ -296,18 +297,32 @@ def _load_yaml_subset(path: Path) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 
+NON_SOURCE_CSV_FILENAMES = frozenset({"temperature_raw.csv"})
+
+
 def discover_csv_files(data_dir: Path, limit_files: Optional[int]) -> List[Path]:
     """
     Discover CSV files under data directory and sort by timestamp-in-filename
-    when present, fallback to lexical name order.
+    when present, fallback to lexical name order. Exclude known aggregate CSVs
+    before applying the optional source-file limit.
     """
     files = [
         p
         for p in data_dir.glob("*.csv")
-        if p.is_file() and p.name.lower().endswith(".csv")
+        if p.is_file()
+        and p.name.lower().endswith(".csv")
+        and p.name.lower() not in NON_SOURCE_CSV_FILENAMES
     ]
 
-    files.sort(key=lambda p: ((_parse_filename_timestamp(p.name) or dt.datetime.min.replace(tzinfo=dt.timezone.utc)), p.name))
+    files.sort(
+        key=lambda p: (
+            (
+                _parse_filename_timestamp(p.name)
+                or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+            ),
+            p.name,
+        )
+    )
 
     if limit_files is not None:
         files = files[:limit_files]
@@ -379,7 +394,9 @@ def build_phase1_temperature(
                     {
                         "file_name": file_path.name,
                         "file_path": str(file_path),
-                        "file_timestamp_utc": (_parse_filename_timestamp(file_path.name) or ""),
+                        "file_timestamp_utc": (
+                            _parse_filename_timestamp(file_path.name) or ""
+                        ),
                         "row_count": row_count,
                         "schema_valid_rows": 0,
                         "schema_invalid_rows": schema_invalid,
@@ -458,7 +475,9 @@ def build_phase1_temperature(
     for bucket in buckets_sorted:
         row: Dict[str, Any] = {
             "bucket_epoch": bucket,
-            "bucket_time_utc": dt.datetime.fromtimestamp(bucket, tz=dt.timezone.utc).isoformat(),
+            "bucket_time_utc": dt.datetime.fromtimestamp(
+                bucket, tz=dt.timezone.utc
+            ).isoformat(),
         }
 
         available_devices = 0
@@ -480,18 +499,29 @@ def build_phase1_temperature(
                 available_devices += 1
 
         total_fields = len(devices_sorted) if devices_sorted else 1
-        completeness_component = (available_devices / total_fields) if total_fields else 0.0
-        freshness_component = 1.0 - min(1.0, max_age_seconds / max(1, stale_threshold_seconds))
-        confidence = completeness_weight * completeness_component + freshness_weight * freshness_component
+        completeness_component = (
+            (available_devices / total_fields) if total_fields else 0.0
+        )
+        freshness_component = 1.0 - min(
+            1.0, max_age_seconds / max(1, stale_threshold_seconds)
+        )
+        confidence = (
+            completeness_weight * completeness_component
+            + freshness_weight * freshness_component
+        )
 
         row["available_devices"] = available_devices
         row["max_age_seconds"] = max_age_seconds
         row["snapshot_confidence"] = round(confidence, 6)
-        row["meets_min_device_coverage"] = int(available_devices >= min_devices_per_snapshot)
+        row["meets_min_device_coverage"] = int(
+            available_devices >= min_devices_per_snapshot
+        )
         row["average_temperature_all_devices"] = (
             ""
             if not avg_candidates_all_devices
-            else round(sum(avg_candidates_all_devices) / len(avg_candidates_all_devices), 6)
+            else round(
+                sum(avg_candidates_all_devices) / len(avg_candidates_all_devices), 6
+            )
         )
         row["average_temperature_all_devices_count"] = len(avg_candidates_all_devices)
 
@@ -500,10 +530,20 @@ def build_phase1_temperature(
 
         aligned_rows.append(row)
 
-    schema_validity_percent = 100.0 * counters["rows_schema_valid"] / max(1, counters["rows_total"])
-    duplicate_key_rate_percent = 100.0 * counters["rows_temperature_duplicate"] / max(1, counters["rows_temperature"])
-    stale_snapshot_rate_percent = 100.0 * stale_snapshot_count / max(1, len(aligned_rows))
-    coverage_ok_count = sum(1 for r in aligned_rows if r["meets_min_device_coverage"] == 1)
+    schema_validity_percent = (
+        100.0 * counters["rows_schema_valid"] / max(1, counters["rows_total"])
+    )
+    duplicate_key_rate_percent = (
+        100.0
+        * counters["rows_temperature_duplicate"]
+        / max(1, counters["rows_temperature"])
+    )
+    stale_snapshot_rate_percent = (
+        100.0 * stale_snapshot_count / max(1, len(aligned_rows))
+    )
+    coverage_ok_count = sum(
+        1 for r in aligned_rows if r["meets_min_device_coverage"] == 1
+    )
     device_coverage_percent = 100.0 * coverage_ok_count / max(1, len(aligned_rows))
 
     qc = {
@@ -541,7 +581,12 @@ def write_csv_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
 
 def write_qc_report(path: Path, qc: Dict[str, Any]) -> None:
     """Write single-row QC report as CSV for easy downstream review."""
-    write_csv_rows(path, [qc])
+    csv_qc = dict(qc)
+    if "excluded_non_source_csv_filenames" in csv_qc:
+        csv_qc["excluded_non_source_csv_filenames"] = json.dumps(
+            csv_qc["excluded_non_source_csv_filenames"]
+        )
+    write_csv_rows(path, [csv_qc])
 
 
 def build_phase1_average_statistics_rows(
@@ -588,7 +633,11 @@ def build_phase1_average_statistics_rows(
         if values:
             values_sorted = sorted(values)
             out["mean"] = round(statistics.mean(values_sorted), 6)
-            out["std_dev"] = round(statistics.stdev(values_sorted), 6) if len(values_sorted) > 1 else 0.0
+            out["std_dev"] = (
+                round(statistics.stdev(values_sorted), 6)
+                if len(values_sorted) > 1
+                else 0.0
+            )
             for p in percentiles:
                 pv = _percentile_linear(values_sorted, p)
                 out[f"p{p:02d}"] = "" if pv is None else round(pv, 6)
@@ -598,7 +647,170 @@ def build_phase1_average_statistics_rows(
     return rows
 
 
-def evaluate_quality_gates(qc: Dict[str, Any], gates: Dict[str, Any]) -> Tuple[bool, List[Dict[str, Any]]]:
+PHASE3A_APPROVED_SENSOR_IDS = ("A", "C", "D", "E", "F", "G")
+
+
+def build_phase3a_average_values(
+    aligned_rows: List[Dict[str, Any]],
+    experiment_config: Dict[str, Any],
+) -> List[float]:
+    """Validate the interval and compute its fixed six-sensor means."""
+    sensor_ids = tuple(experiment_config.get("selected_sensor_ids", ()))
+    if sensor_ids != PHASE3A_APPROVED_SENSOR_IDS:
+        raise ValueError("Phase 3A cohort must remain exactly A, C, D, E, F, and G.")
+
+    sensor_columns = [f"{sensor_id}_temperature" for sensor_id in sensor_ids]
+    configured_columns = experiment_config.get("selected_sensor_temperature_columns")
+    if configured_columns != sensor_columns:
+        raise ValueError("Phase 3A sensor columns do not match the approved cohort.")
+    if experiment_config.get("endpoint_convention") != "inclusive":
+        raise ValueError("Phase 3A interval endpoints must both be inclusive.")
+
+    interval_seconds = experiment_config.get("sampling_interval_seconds")
+    expected_count = experiment_config.get("expected_bucket_count")
+    if (
+        interval_seconds != 60
+        or isinstance(expected_count, bool)
+        or not isinstance(expected_count, int)
+    ):
+        raise ValueError(
+            "Phase 3A requires an integer bucket count and 60-second interval."
+        )
+
+    start = dt.datetime.fromisoformat(experiment_config["start_timestamp_utc"])
+    end = dt.datetime.fromisoformat(experiment_config["end_timestamp_utc"])
+    if start.tzinfo is None or end.tzinfo is None:
+        raise ValueError("Phase 3A interval endpoints must be timezone-aware.")
+    start = start.astimezone(dt.timezone.utc)
+    end = end.astimezone(dt.timezone.utc)
+    elapsed_seconds = (end - start).total_seconds()
+    if elapsed_seconds <= 0 or elapsed_seconds % interval_seconds:
+        raise ValueError(
+            "Phase 3A endpoints must define a positive one-minute interval."
+        )
+    elapsed_minutes = int(elapsed_seconds // interval_seconds)
+    if expected_count != elapsed_minutes + 1:
+        raise ValueError("Phase 3A bucket count must include both interval endpoints.")
+    if experiment_config.get("expected_elapsed_minutes") != elapsed_minutes:
+        raise ValueError(
+            "Phase 3A expected elapsed minutes do not match its endpoints."
+        )
+
+    selected_rows = []
+    for row in aligned_rows:
+        timestamp = dt.datetime.fromisoformat(str(row["bucket_time_utc"]))
+        if timestamp.tzinfo is None:
+            raise ValueError("Phase 1 bucket timestamps must be timezone-aware.")
+        timestamp = timestamp.astimezone(dt.timezone.utc)
+        if start <= timestamp <= end:
+            selected_rows.append((row, timestamp))
+
+    if len(selected_rows) != expected_count:
+        raise ValueError(
+            f"Phase 3A requires {expected_count} aligned buckets; "
+            f"found {len(selected_rows)}."
+        )
+    timestamps = [timestamp for _, timestamp in selected_rows]
+    if len(set(timestamps)) != len(timestamps):
+        raise ValueError("Phase 3A aligned input contains duplicate timestamps.")
+    if any(left >= right for left, right in zip(timestamps, timestamps[1:])):
+        raise ValueError("Phase 3A aligned timestamps must be strictly increasing.")
+    if timestamps[0] != start or timestamps[-1] != end:
+        raise ValueError("Phase 3A aligned input does not include the exact endpoints.")
+
+    average_values = []
+    for index, (row, timestamp) in enumerate(selected_rows):
+        epoch = _safe_numeric(row.get("bucket_epoch"))
+        if epoch is None or not math.isfinite(epoch) or int(epoch) != epoch:
+            raise ValueError(
+                f"Phase 3A bucket_epoch is invalid at {timestamp.isoformat()}."
+            )
+        if int(epoch) != int(timestamp.timestamp()):
+            raise ValueError(
+                "Phase 3A bucket_epoch does not match " f"{timestamp.isoformat()}."
+            )
+        if (
+            index
+            and (timestamp - timestamps[index - 1]).total_seconds() != interval_seconds
+        ):
+            raise ValueError(
+                f"Phase 3A timestamp gap before {timestamp.isoformat()}; "
+                "expected exactly 60 seconds."
+            )
+
+        readings = []
+        for column in sensor_columns:
+            value = _safe_numeric(row.get(column))
+            if value is None or not math.isfinite(value):
+                raise ValueError(
+                    f"Phase 3A requires a finite {column} value at "
+                    f"{timestamp.isoformat()}."
+                )
+            readings.append(value)
+        average_values.append(sum(readings) / len(sensor_ids))
+
+    return average_values
+
+
+def build_phase3a_average_statistics_row(
+    average_values: List[float],
+    percentiles: List[int],
+) -> Dict[str, Any]:
+    """Build the Phase 3A statistics row, retaining full precision for P90."""
+    if not average_values or 90 not in percentiles:
+        raise ValueError("Phase 3A statistics require values and configured P90.")
+    if any(not math.isfinite(value) for value in average_values):
+        raise ValueError("Phase 3A average values must all be finite.")
+
+    sorted_values = sorted(average_values)
+    row: Dict[str, Any] = {
+        "series_name": "phase3a_stable_cohort",
+        "source_column": "phase3a_six_sensor_average",
+        "confidence_filter": "all_valid_phase3a_interval_buckets",
+        "filtered_snapshot_count": len(sorted_values),
+        "non_null_value_count": len(sorted_values),
+        "mean": round(statistics.mean(sorted_values), 6),
+        "std_dev": (
+            round(statistics.stdev(sorted_values), 6) if len(sorted_values) > 1 else 0.0
+        ),
+    }
+    for percentile in percentiles:
+        value = _percentile_linear(sorted_values, percentile)
+        if value is None:
+            row[f"p{percentile:02d}"] = ""
+        elif percentile == 90:
+            row[f"p{percentile:02d}"] = value
+        else:
+            row[f"p{percentile:02d}"] = round(value, 6)
+    return row
+
+
+def set_authoritative_phase3a_threshold(
+    experiment_config: Dict[str, Any],
+    p90_value: float,
+    statistics_artifact: str = "artifacts/phase1_average_statistics.csv",
+) -> Dict[str, Any]:
+    """Update config after the Phase 3A P90 statistics row is written."""
+    if not math.isfinite(p90_value):
+        raise ValueError("Authoritative Phase 3A P90 must be finite.")
+    threshold = experiment_config.setdefault("threshold", {})
+    threshold.update(
+        {
+            "source_series": "phase3a_stable_cohort",
+            "statistic": "p90",
+            "p90_value": p90_value,
+            "status": "authoritative",
+            "statistics_artifact": statistics_artifact,
+            "production_script": "scripts/build_phase1_temperature.py",
+        }
+    )
+    threshold.pop("temporary_development_source_series", None)
+    return experiment_config
+
+
+def evaluate_quality_gates(
+    qc: Dict[str, Any], gates: Dict[str, Any]
+) -> Tuple[bool, List[Dict[str, Any]]]:
     """
     Compare computed QC metrics against gate thresholds from config.
     Returns overall pass/fail and a list of per-gate results.
@@ -663,6 +875,10 @@ def append_decisions_log(
     lines.append(f"- Config file: {run_meta['config_path']}")
     lines.append(f"- Data directory: {run_meta['data_dir']}")
     lines.append(f"- Files processed: {qc['files_processed']}")
+    lines.append(
+        "- Excluded non-source CSV filenames: "
+        + json.dumps(qc.get("excluded_non_source_csv_filenames", []))
+    )
     lines.append("")
     lines.append("### Locked Defaults Used")
     lines.append(f"- bucket_size_seconds: {run_meta['bucket_size_seconds']}")
@@ -734,6 +950,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     stats_cfg = cfg.get("summary_statistics", {})
     artifacts_cfg = cfg.get("artifacts", {})
 
+    phase3a_config_path = (
+        repo_root / "config/phase3a_experiment_config.json"
+    ).resolve()
+    phase3a_config = None
+    if args.limit_files is None:
+        if not phase3a_config_path.exists():
+            raise FileNotFoundError(
+                "Required Phase 3A experiment config not found: "
+                f"{phase3a_config_path}"
+            )
+        phase3a_config = json.loads(phase3a_config_path.read_text(encoding="utf-8"))
+
     files = discover_csv_files(data_dir, args.limit_files)
     if not files:
         print(f"No CSV files found in {data_dir}")
@@ -744,30 +972,69 @@ def main(argv: Optional[List[str]] = None) -> int:
         bucket_size_seconds=int(global_cfg["bucket_size_seconds"]),
         stale_threshold_seconds=int(phase1_cfg["stale_threshold_seconds"]),
         min_devices_per_snapshot=int(global_cfg["min_devices_per_snapshot"]),
-        drop_snapshot_if_stale_over_threshold=bool(global_cfg.get("drop_snapshot_if_stale_over_threshold", True)),
+        drop_snapshot_if_stale_over_threshold=bool(
+            global_cfg.get("drop_snapshot_if_stale_over_threshold", True)
+        ),
         completeness_weight=float(conf_cfg["completeness_weight"]),
         freshness_weight=float(conf_cfg["freshness_weight"]),
+    )
+    qc["excluded_non_source_csv_filenames"] = sorted(
+        p.name
+        for p in data_dir.glob("*.csv")
+        if p.is_file() and p.name.lower() in NON_SOURCE_CSV_FILENAMES
     )
 
     raw_index_path = (repo_root / artifacts_cfg["raw_index"]).resolve()
     phase1_out_path = (repo_root / artifacts_cfg["phase1_aligned"]).resolve()
     qc_path = (repo_root / artifacts_cfg["qc_report"]).resolve()
     decisions_path = (repo_root / artifacts_cfg["decisions_log"]).resolve()
-    phase1_stats_path = (repo_root / artifacts_cfg["phase1_average_statistics"]).resolve()
+    phase1_stats_path = (
+        repo_root / artifacts_cfg["phase1_average_statistics"]
+    ).resolve()
 
     percentiles = [int(p) for p in stats_cfg.get("percentiles", list(range(5, 100, 5)))]
     percentiles = sorted({p for p in percentiles if 0 < p < 100})
     confidence_threshold = float(stats_cfg.get("confidence_threshold", 0.75))
 
-    write_csv_rows(raw_index_path, raw_index_rows)
-    write_csv_rows(phase1_out_path, aligned_rows)
-    write_qc_report(qc_path, qc)
     phase1_stats_rows = build_phase1_average_statistics_rows(
         aligned_rows=aligned_rows,
         confidence_threshold=confidence_threshold,
         percentiles=percentiles,
     )
+    phase3a_average_values = None
+    phase3a_stats_row = None
+    if phase3a_config is not None:
+        configured_stats_path = (
+            repo_root / phase3a_config["threshold"]["statistics_artifact"]
+        ).resolve()
+        if configured_stats_path != phase1_stats_path:
+            raise ValueError(
+                "Phase 3A config statistics artifact does not match "
+                "the Phase 1 output path."
+            )
+        phase3a_average_values = build_phase3a_average_values(
+            aligned_rows, phase3a_config
+        )
+        phase3a_stats_row = build_phase3a_average_statistics_row(
+            phase3a_average_values, percentiles
+        )
+        phase1_stats_rows.append(phase3a_stats_row)
+
+    write_csv_rows(raw_index_path, raw_index_rows)
+    write_csv_rows(phase1_out_path, aligned_rows)
+    write_qc_report(qc_path, qc)
     write_csv_rows(phase1_stats_path, phase1_stats_rows)
+
+    if phase3a_stats_row is not None:
+        phase3a_config = set_authoritative_phase3a_threshold(
+            phase3a_config,
+            phase3a_stats_row["p90"],
+            statistics_artifact=(phase1_stats_path.relative_to(repo_root).as_posix()),
+        )
+        phase3a_config_path.write_text(
+            json.dumps(phase3a_config, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     pass_gates, gate_checks = evaluate_quality_gates(qc, gates_cfg)
 
@@ -799,6 +1066,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         "quality_gates_passed": pass_gates,
         "qc": qc,
         "gate_checks": gate_checks,
+        "phase3a_threshold": (
+            {
+                "series_name": "phase3a_stable_cohort",
+                "statistic": "p90",
+                "value": phase3a_stats_row["p90"],
+                "sample_count": len(phase3a_average_values),
+                "status": "authoritative",
+            }
+            if phase3a_stats_row is not None
+            else None
+        ),
     }
     print(json.dumps(summary, indent=2))
 

@@ -31,4 +31,5 @@ artifacts/*.csv
 artifacts/*.json
 artifacts/*.log
 artifacts/transformation_decisions.md
+artifacts/phase1_duplicate_qc/
 !artifacts/README.md

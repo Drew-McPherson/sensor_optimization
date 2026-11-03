@@ -1,6 +1,6 @@
 # Distributed Monitoring POC Project Plan
 
-Revision focus (2026-10-21): Phase 3 observed-only experiment protocol, definitive chapter precedence, event-based clustering, source-preserving history, highest-ID coordinators, and synchronization traffic attribution.
+Revision focus (2026-11-01): sponsor-approved Phase 3A stable-cohort pivot, matched Phase 2/FMIC/SMIC comparison, cohort-specific thresholding, compact reproducible outputs, and optional Phase 3B availability robustness.
 
 ## 1) How To Read This Plan
 
@@ -8,120 +8,142 @@ This document has two layers:
 1. Discussion view for stakeholder alignment.
 2. Implementation view with deterministic rules that can be coded directly.
 
+The sponsor-approved `Phase_3A_Pivot_Plan.md` is incorporated into this plan as of 2026-11-01. For Phase 3A, the provisions below supersede earlier plan language that required changing observed contributors, re-entry handling, or availability-triggered synchronization as part of the primary FMIC/SMIC experiment.
+
 Primary project sequence:
-1. Phase 1 transformation creates aligned temperature snapshots.
-2. Phase 2 deterministic monitoring consumes those snapshots and emits sensor-level re-sync decisions.
-3. Phase 3 validates FMIC/SMIC clustering after Phase 2 under Approach A: a fixed selected cohort with synchronization on every change in observed contributors, matched across all three algorithms.
-4. Multivariate extension is deferred until the temperature-only clustering experiment is validated and interpreted.
+1. Phase 1 transformation creates the full aligned temperature snapshots and Phase 1 statistics.
+2. Phase 2 deterministic monitoring remains the validated non-clustered implementation. The existing full-data run remains historical project evidence.
+3. Phase 3A selects a sponsor-approved stable six-sensor cohort and interval from the Phase 1 aligned output, adds a cohort-specific p90 statistics row, and reruns the existing Phase 2 engine on that exact experimental population to create the matched baseline.
+4. Phase 3A implements and evaluates FMIC and SMIC on the same cohort, interval, threshold, observations, boundary convention, and communication-counting rules.
+5. Phase 3B is an optional later robustness extension for the broader dataset with changing sensor availability. It is not on the Phase 3A critical path.
+6. Multivariate extension remains deferred until the temperature-only clustering experiment is validated and interpreted.
 
 ---
 
 ## 2) Conflict Resolution And Locked Decisions
 
 Precedence rule for this repository:
-1. The definitive methodology source is `140516editor Book Chapter (Last Version).pdf`, *Clustering for Monitoring Distributed Data Streams*. If this plan or another summary, including Distributed_Data_Streams (1), conflicts with that chapter, the chapter takes precedence.
-2. Section 1.4 and Algorithms 1.4.1-1.4.2 define the clustering/monitoring method; the chapter's appendices define moment calculations and source-comparable broadcast accounting.
-3. This plan records the temperature-only operational policies and explicitly labeled adaptations without presenting them as source equations. The [Phase 3 user stories](Phase_3_User_Stories.md) translate these policies into acceptance criteria.
+1. The definitive methodology source is `140516editor Book Chapter (Last Version).pdf`, *Clustering for Monitoring Distributed Data Streams*. If this plan or another summary conflicts with the chapter on history, normalization, clustering mathematics, FMIC/SMIC calculations, or source-comparable broadcast accounting, the chapter takes precedence.
+2. `Phase_3A_Pivot_Plan.md` records the sponsor-approved experimental redesign for Phase 3A and is incorporated into this plan. It governs the Phase 3A experimental population and simplification decisions.
+3. Section 1.4 and Algorithms 1.4.1–1.4.2 of the definitive chapter define the clustering/monitoring method; the chapter appendices define moment calculations and source-comparable broadcast accounting.
+4. Existing Phase 3 user stories remain historical implementation records. New user stories added after the existing sequence will implement the Phase 3A pivot and explicitly supersede conflicting prior requirements for the Phase 3A path.
 
 ### 2.1 Scope Changes From Prior Version
-1. Prior plan: Phase 2 was multivariate transformation from raw files.
-2. Updated plan: Phase 2 is deterministic temperature monitoring over aligned Phase 1 output.
-3. Prior multivariate scope is no longer a prerequisite for Phase 3. Phase 3 first evaluates source-aligned clustering on the temperature-only streams.
-4. Multivariate monitoring remains a possible later extension after FMIC/SMIC validation; it must not be mixed into the initial clustering experiment.
+1. Phase 1 remains the full temperature transformation core; its transformation logic is unchanged.
+2. Phase 2 remains the deterministic non-clustered monitoring implementation. The existing full-data Phase 2 run is preserved as a historical artifact.
+3. The primary clustering experiment is now **Phase 3A**, a stable-cohort experiment using six continuously observed sensors over a locked interval.
+4. The previous Phase 3 requirement to model departures, returns, changing observed contributors, re-entry synchronization, changing denominators, and availability-driven coordinator changes is removed from the Phase 3A critical path.
+5. Those availability-aware requirements are reserved for optional **Phase 3B** robustness work.
+6. Phase 3A production outputs are intentionally compact. Detailed deterministic intermediate states are validated through tests or optional debug traces rather than persisted for every row and alpha.
+7. Alpha is treated as a dataset-specific tuning parameter rather than a primary research question.
+8. Multivariate monitoring remains a possible later extension after FMIC/SMIC validation; it must not be mixed into the Phase 3A experiment.
 
 ### 2.2 Locked Decisions
-1. Required Phase 2 primary input is artifacts/aligned_phase1_temperature.csv.
-2. Required threshold source is artifacts/phase1_average_statistics.csv (recompute p90 each run).
-3. Required Phase 2 output is artifacts/phase2_temperature_sensors.csv.
-4. Optional raw back-reference to Data/files_csv is allowed but not required for Phase 2 runtime.
-5. The local deviation definition is delta_v_i(t) = v_i(t) - v_i(t0_i), where t0_i is the most recent synchronization time for sensor i.
-6. Global safety tracking follows the Distributed_Data_Streams formulation: monitor feasibility via margin-to-boundary semantics, with univariate temperature instantiated from p90 and global average.
-7. Operational local trigger for this deterministic POC is delta_v_i(t) >= margin_i (warming-only), with default equal local margin assignment at each synchronization event.
-8. Global margin uses delta_global = p90 - xbar(t0); logic uses unrounded values and delta may be negative.
-9. Initialize through a counted synchronization on the first bucket with valid observations. Leading empty buckets remain undefined with synchronization pending; never look ahead for a reference.
-10. If re-sync is triggered at row t, updated reference state applies starting row t+1; negative delta at row t schedules re-sync for row t+1.
-11. Communication reporting must include category-level counts (trigger, request, response, broadcast, total); request-only counts are retained as a legacy comparator.
-12. Canonical boundary convention is fixed for Phase 2 aligned outputs: safe when metric < boundary and violated when metric >= boundary.
-13. Predicted positive minute for diagnostics remains explicitly defined in the output and must be documented alongside the trigger semantics used in that run.
-14. Recall and precision are diagnostic reporting metrics only, not pass/fail gates.
-15. Phase 2 implementation artifact is a separate notebook with multiple cells.
-16. Phase 3 must validate Phase 2 correctness before any clustering comparison is treated as interpretable.
-17. Phase 3 must implement and validate FMIC and SMIC separately before any combined comparison is reported.
-18. Alpha is a clustering design/tuning parameter, not an established optimum for this dataset. alpha=0.10 may be retained only as a named baseline setting.
-19. Required Phase 3 alpha sensitivity sweep is 0.05, 0.10, ..., 0.95. The full sensitivity results must be retained; the best-performing value may be identified after the sweep rather than treated as prespecified.
-20. Phase 3 compares algorithms under the same Approach A availability policy and reports synchronization causes separately. It does not claim an availability-free clustering effect or require duplicate fixed/dynamic experiments.
-21. No sensor-value imputation is permitted in any project phase. Missing/stale readings remain missing, never zero or a carried-forward temperature. Comparisons against Phase 2 or centralized baselines must use consistent observed-only availability and denominator policies.
-22. Cluster construction must follow the source methodology for history vectors, normalization, partition quality, greedy merge procedure, and FMIC/SMIC allowance weights unless an adaptation is explicitly labeled and justified.
-23. History updates must use signed change relative to the active synchronization reference, not change relative to the immediately prior minute.
-24. Missing/offline readings must never be silently converted to zero change. Returning sensors must complete re-entry synchronization before their history resumes.
-25. Signed cancellation inside a cluster may suppress unnecessary root escalation only when the monitored global condition remains correct. Local sensor violations must still be detected and logged.
-26. Phase 3 communication accounting must separate routine monitoring, cluster collection/checks, root escalation, synchronization, membership change, coordinator reassignment, and total messages.
-27. Clustering occurs at initial synchronization and every later completed resynchronization, never on a timer. The resulting partition, coordinators, references, and allowances apply starting on the next row.
-28. Accumulated history is retained and discounted across resynchronizations, not reset after clustering; subsequent valid updates use the newly synchronized reference.
-29. Each cluster's coordinator is its highest-ID available member, using documented deterministic sensor-ID ordering.
-30. Cluster/coordinator information is included with normal synchronization threshold updates. It creates no additional standalone formation/reassignment transmissions; message types and synchronization causes must not double-count bundled traffic.
-31. Approach A keeps the selected cohort constant while averaging its currently observed readings. Departure occurs on the first missing bucket after Phase 1 freshness filtering; return occurs on the first valid reading. Every departure/return triggers synchronization in Phase 2/FMIC/SMIC and reclustering on completion in Phase 3.
-32. No minimum active-sensor count is imposed. Zero valid readings imply undefined global mean and threshold decision; observation-dependent synchronization cannot complete until valid readings are available.
-33. Online/offline status is known without communication. Send synchronization requests and threshold updates only to currently online sensors, count only their responses, and generate zero offline-sensor traffic. Startup synchronization is included in totals.
+1. Required Phase 2 primary input remains `artifacts/aligned_phase1_temperature.csv`.
+2. The existing full-data Phase 2 run may continue to use its existing Phase 1 threshold source for historical comparability.
+3. Phase 3A uses sensors **A, C, D, E, F, and G** only.
+4. Phase 3A uses the continuous UTC interval from **2022-02-24T18:50:00+00:00** through **2022-03-10T15:53:00+00:00**, inclusive, with **19,984 one-minute buckets**. Both endpoints are inclusive, so the interval spans 19,983 elapsed minutes.
+5. Every selected sensor must have a valid observation in every Phase 3A bucket. No sensor-value imputation is permitted. If cohort, interval, row count, or completeness validation fails, Phase 3A stops rather than falling back to dynamic availability handling.
+6. `phase1_average_statistics.csv` will retain the existing statistics and add a clearly identified Phase 3A row (for example `phase3a_stable_cohort`) computed from the six-sensor mean over the locked interval.
+7. The Phase 3A p90 must be calculated programmatically from the approved experimental population. The planning estimate is approximately **22.42866665 °C** and must not be hard-coded as the authoritative value.
+8. The current Phase 2 monitoring code is reused rather than rewritten. A matched Phase 3A Phase 2 run is created by filtering to the approved cohort/interval and using the Phase 3A p90.
+9. Membership-change behavior must never activate in the matched Phase 3A Phase 2 run. If it does, the input/filtering logic is incorrect.
+10. The primary Phase 3A comparison is **stable-cohort Phase 2 vs. stable-cohort FMIC vs. stable-cohort SMIC** under identical observations, timestamps, threshold, boundary convention, synchronization timing where applicable, and communication-counting definitions.
+11. The local deviation definition remains `delta_v_i(t) = v_i(t) - v_i(t0_i)`, where `t0_i` is the most recent synchronization reference for sensor i.
+12. The canonical boundary convention remains safe when metric `<` boundary and violated when metric `>=` boundary. Logic uses unrounded values.
+13. Source-aligned history remains persistent across resynchronizations and uses signed change relative to the active synchronization reference, not prior-minute change.
+14. Phase 3A normalization uses the same six sensors at every clustering event. For scalar history, `H = max_i |h_i|`; when `H > 0`, `a_i = h_i / H`, preserving sign and raw history.
+15. The initial all-zero-history case remains a valid deterministic edge case and uses the previously agreed singleton fallback.
+16. Cluster quality, partition quality, signed cancellation, greedy merging, stopping behavior, and final partition selection remain source-aligned and are not simplified away.
+17. Phase 3A removes runtime logic used only for changing availability: departures, returns/re-entry, changing eligible sets, offline history suspension, changing denominators, membership-triggered synchronization, membership cause attribution, availability-driven coordinator changes, zero-observation states, and deferred synchronization waiting for return.
+18. Detailed availability-aware logic may be retained for optional Phase 3B, but it must not complicate the primary Phase 3A execution path.
+19. Full sensor-by-minute history traces and exhaustive clustering-search audits are not normal Phase 3A deliverables.
+20. Phase 3A retains compact event-level state sufficient to understand and reproduce clustering results: event/synchronization ID, timestamp, algorithm, alpha, raw histories, normalized histories, selected partition, selected partition quality, cluster count, and coordinator assignments.
+21. Detailed traces may be generated only through explicit debug/test modes or small samples.
+22. FMIC is implemented and validated end-to-end before SMIC.
+23. FMIC and SMIC share one monitoring architecture; their main algorithm-specific difference is the source-defined weighting/allowance calculation.
+24. Initial correctness work may use `alpha=0.10` as a baseline implementation value only.
+25. After FMIC and SMIC are correct end-to-end, a compact coarse alpha sweep `0.05, 0.10, ..., 0.95` may be used for dataset-specific tuning. Alpha is not presented as a universal optimum or central research finding.
+26. Phase 3A communication accounting must separately count actual transmission types and reconcile exactly to total messages. Membership-related categories are not required because membership is fixed.
+27. Correctness is demonstrated primarily with focused synthetic and hand-calculated tests rather than by retaining every deterministic full-run intermediate state.
+28. Reproducibility means that the original aligned data, experiment configuration, threshold statistics row, implementation code/notebook, deterministic algorithms, focused tests, and compact results are sufficient to reproduce the reported experiment.
+29. Phase 3B is optional. Phase 3A must be completed and interpreted before any Phase 3B work is considered required.
+30. Existing Phase 3 user stories are not rewritten retroactively; new pivot stories govern the Phase 3A implementation where they conflict with prior availability-heavy requirements.
 
 ---
 
 ## 3) Executive Summary (Discussion View)
 
 ### What This Experiment Is Proving
-We are testing two linked questions:
-1. whether deterministic distributed monitoring, aligned to the definitive chapter's local-deviation framework, can reduce communication while preserving correct global threshold monitoring; and
-2. whether source-aligned FMIC/SMIC clustering can further reduce communication through cancellation without concealing required warnings or attributing savings to unrelated membership-synchronization behavior.
+The project tests two linked questions:
+1. whether deterministic distributed monitoring can reduce communication relative to centralized all-sensor-every-minute messaging while preserving correct global-threshold monitoring; and
+2. whether source-aligned FMIC/SMIC clustering can further reduce communication relative to a matched Phase 2 baseline through signed cancellation.
+
+For Phase 3A, the experiment deliberately removes changing sensor availability as a confounder. The selected six sensors are continuously observed for the full approved interval, so communication differences can be interpreted primarily as algorithm differences rather than availability-management effects.
 
 ### Why This Design Is Deterministic
-The workflow does not train a model. It applies fixed rules over aligned minute-bucket data:
-1. fixed threshold source (run-specific p90),
-2. fixed local-deviation trigger logic and synchronization update rules,
-3. fixed state update timing,
-4. fixed counting and evaluation definitions.
+The workflow does not train a predictive model. It applies fixed rules over aligned minute-bucket data:
+1. a locked experimental cohort and interval;
+2. a programmatically derived Phase 3A p90 threshold from that experimental population;
+3. fixed history, clustering, allowance, boundary, synchronization, and message-counting rules;
+4. shared implementation logic for FMIC and SMIC except where the source defines different weight/allowance calculations.
 
 ### What Success Looks Like
-1. Fewer communication events than centralized all-sensor-every-minute messaging.
-2. No hidden behavior (all state transitions are logged row-by-row).
-3. Diagnostic recall remains high during threshold exceedance windows.
-4. Phase 3 synthetic correctness tests show no global threshold violation is concealed by cluster cancellation.
-5. Phase 3 reports communication by cause and message type so clustering savings can be separated from membership-management costs.
-6. Alpha sensitivity is reported transparently rather than presenting one selected alpha as an established optimum.
+1. The Phase 3A input contract passes: six approved sensors, approved inclusive interval, 19,984 buckets, exact 60-second timestamp spacing, and no missing selected-sensor readings.
+2. The cohort-specific p90 is reproducibly calculated and recorded in Phase 1 statistics.
+3. A matched Phase 2 baseline is produced from the same experimental population.
+4. Source-aligned history, normalization, clustering, FMIC, and SMIC formulas pass focused synthetic and hand-calculated tests.
+5. No correctness test shows a global threshold violation concealed by cluster cancellation.
+6. Communication categories reconcile exactly to total messages.
+7. Phase 3A production artifacts remain small enough to inspect and manage directly.
+8. The final Phase 2/FMIC/SMIC comparison is understandable without reconstructing gigabytes of intermediate state.
+9. Phase 3B availability robustness is treated as optional follow-on work rather than a prerequisite for the core result.
 
 ---
 
 ## 4) Experiment Scope And Phases
 
 ### Phase 0 - Setup And Lock Assumptions
-Objective: freeze definitions, metrics, and state-machine semantics.
+Objective: freeze definitions, source precedence, metrics, and state-machine semantics.
 
 ### Phase 1 - Temperature Transformation Core
 Objective: transform raw telemetry into aligned minute snapshots with quality metadata.
-Output: artifacts/aligned_phase1_temperature.csv and supporting QC/statistics artifacts.
+
+Primary outputs:
+- `artifacts/aligned_phase1_temperature.csv`
+- `artifacts/phase1_average_statistics.csv`
+
+Phase 1 transformation logic remains unchanged. A Phase 3A-specific statistics row is added downstream from the aligned output for the approved six-sensor interval.
 
 ### Phase 2 - Deterministic Temperature Sensor Monitoring
-Objective: execute deterministic local-deviation monitoring and re-sync logic on aligned snapshots, preserving the definitive chapter's monitoring semantics with the documented temperature-only operational policies.
-Bridge to source formulation: Phase 2 is the d=1 case of the multivariate framework and is treated as a constrained implementation subset, not a replacement for multivariate scope.
-Input: artifacts/aligned_phase1_temperature.csv plus p90 from artifacts/phase1_average_statistics.csv.
-Output: artifacts/phase2_temperature_sensors.csv.
+Objective: execute deterministic local-deviation monitoring and re-sync logic on aligned snapshots.
 
-### Phase 3 - Temperature Clustering Extension (FMIC/SMIC)
-Objective: determine whether source-aligned clustering further reduces communication on the temperature streams while preserving monitoring correctness and making the source of any savings identifiable.
+Two Phase 2 results are distinguished:
+1. **Existing full-data Phase 2 result:** retained as historical evidence of the availability-aware implementation.
+2. **Matched Phase 3A Phase 2 baseline:** rerun the existing Phase 2 engine on the six approved sensors and locked 19,984-bucket continuous interval using the Phase 3A-specific p90. This is the comparator used for FMIC/SMIC.
+
+### Phase 3A - Stable-Cohort Temperature Clustering Extension (Required)
+Objective: determine whether source-aligned FMIC and SMIC clustering reduce communication beyond the matched stable-cohort Phase 2 baseline while preserving monitoring correctness.
 
 Required sequence:
-1. Validate Phase 2 behavior with targeted synthetic and row-level tests.
-2. Implement FMIC under Approach A and validate it independently.
-3. Run FMIC alpha sensitivity.
-4. Implement SMIC under Approach A and validate it independently.
-5. Run SMIC alpha sensitivity.
-6. Validate observed-contributor departure/return handling under the same policy in all three algorithms.
-7. Report algorithm differences and availability-related cause attribution without inventing duplicate fixed/dynamic run modes.
-8. Only after these steps, produce the full Phase 2 vs FMIC vs SMIC comparison.
+1. Validate the Phase 3A input contract and derive the Phase 3A p90.
+2. Produce the matched stable-cohort Phase 2 baseline.
+3. Simplify the existing Phase 3 implementation by removing availability-only branches and oversized production traces from the Phase 3A path.
+4. Preserve and revalidate source-aligned history, normalization, partition quality, and greedy clustering already implemented.
+5. Implement FMIC end-to-end using one baseline alpha and validate it.
+6. Implement SMIC through the same monitoring architecture and validate it independently.
+7. Run compact alpha tuning only after both algorithms operate correctly end-to-end.
+8. Produce the final matched Phase 2 vs. FMIC vs. SMIC comparison.
 
-Interpretation rule: the initial Phase 3 experiment remains temperature-only. Multivariate monitoring is deferred so that clustering effects are not confounded with a simultaneous change in dimensionality.
+### Phase 3B - Availability Robustness Extension (Optional)
+Objective: if time and sponsor interest permit, evaluate the broader dataset with sensor departure/return, changing observed contributors, re-entry handling, changing coordinators, and availability-related communication attribution.
+
+Phase 3B is not required for Phase 3A completion and must not delay FMIC/SMIC implementation for the stable cohort.
 
 ### Phase 4 - Validation And Packaging
-Objective: consolidate metrics, sensitivity results, and stakeholder-ready outputs.
+Objective: consolidate compact metrics, selected cluster-event records, tuning results, correctness evidence, limitations, and stakeholder-ready outputs.
+
+Interpretation rule: the initial clustering experiment remains temperature-only. Multivariate monitoring is deferred so that clustering effects are not confounded with a simultaneous change in dimensionality.
 
 ---
 
@@ -161,8 +183,13 @@ Required columns in aligned Phase 1 input:
 4. average_temperature_all_devices (strict global average source).
 
 ### 6.2 Threshold Derivation
-1. Read p90 from phase1_average_statistics.csv each run.
-2. Preferred series: all_devices_observed.
+1. The existing full-data Phase 2 run retains its historical threshold provenance.
+2. For Phase 3A, filter `aligned_phase1_temperature.csv` to sensors A, C, D, E, F, and G over the locked interval.
+3. Compute the six-sensor average for every one of the 19,984 complete, consecutive one-minute buckets.
+4. Compute the Phase 3A p90 programmatically from that experimental series.
+5. Add a clearly identified row such as `phase3a_stable_cohort` to `phase1_average_statistics.csv`; preserve all existing Phase 1 statistics rows.
+6. The planning estimate is approximately `22.42866665`, but the run must use the computed full-precision value rather than a hard-coded approximation.
+7. The matched Phase 2, FMIC, and SMIC runs must all read the same Phase 3A p90 from the statistics artifact.
 
 ### 6.3 State Initialization
 1. Start with undefined global/per-sensor references and margins, no prior membership set, and initialization pending.
@@ -225,7 +252,7 @@ Required implementation artifact:
 2. scripts/phase2_monitoring.py, the state machine used by the notebook and synthetic tests.
 3. scripts/test_phase2_monitoring.py, run with `python -m unittest scripts.test_phase2_monitoring -v`.
 
-This implements the Phase 2 synchronization slice of US-3.9 and the Approach A comparator directly. There are no clustering/coordinator implementations or alternative run modes; reuse this engine with the same selected cohort and inputs for Phase 3 comparisons.
+This is the existing general Phase 2 monitoring engine and remains unchanged by the Phase 3A pivot. The historical full-data run may continue to exercise its availability-aware behavior. For the Phase 3A matched baseline, reuse this same engine after filtering to the locked six-sensor cohort and interval and reading the Phase 3A-specific p90. No separate Phase 2 implementation or alternate monitoring state machine is required.
 
 Notebook sections (cells):
 1. Load input artifacts and constants.
@@ -234,362 +261,415 @@ Notebook sections (cells):
 4. Export phase2_temperature_sensors.csv.
 5. Compute and export diagnostics summary.
 
-### 6.8 Phase 3 Source-Aligned Clustering Specification
-Phase 3 uses the temperature streams as scalar node streams and preserves the same global temperature threshold objective used for the comparable Phase 2 run.
+### 6.8 Phase 3A Experiment Input Contract
+Phase 3A uses the temperature streams as scalar node streams and preserves the same global temperature-threshold objective used by the matched Phase 2 run.
 
+Before any Phase 3A monitoring or clustering occurs, validate:
+1. selected sensors are exactly A, C, D, E, F, and G;
+2. first bucket is `2022-02-24T18:50:00+00:00`;
+3. last bucket is `2022-03-10T15:53:00+00:00`;
+4. row count is exactly 19,984;
+5. every selected sensor has a valid finite temperature in every bucket;
+6. timestamps are unique, strictly increasing, and every adjacent timestamp differs by exactly 60 seconds;
+7. the Phase 3A p90 statistics row exists and was computed from this same cohort and interval.
+
+Failure of any input-contract check stops the Phase 3A run. The implementation must not switch to dynamic availability handling as a fallback.
+
+### 6.9 Phase 3A Source-Aligned Clustering Specification
 Source-alignment checkpoints:
-1. History vectors follow Section 1.4 of `140516editor Book Chapter (Last Version).pdf`: initialize history at zero and repeatedly discount older history while adding the signed change from the active synchronization reference. For each valid observation after the reference row and through the next synchronization row inclusive (`t_j < t <= t_{j+1}`), update the scalar history as `h_i <- 0.5 * h_i + (v_i(t) - v_i(t_j))`. The reference-establishing row does not create an update. On the next synchronization row, first update against the still-active reference, use that result to form the partition, then install the new reference for subsequent rows. Retain history; do not reset it at resynchronization.
-2. Do not replace the synchronization-reference difference with `v_i(t) - v_i(t-1)`.
-3. For completed synchronization event `j`, define eligible sensors `E_j` as selected-cohort sensors online at `t_j` with valid observations participating in that synchronization. The resulting partition contains exactly `E_j`. In the scalar temperature experiment, normalize the eligible history set by `H_j = max_{i in E_j} |h_i(t_j)|` when `H_j > 0`, preserving signs. Multivariate normalization implementation and testing are out of scope for the current Phase 3 experiment.
-4. If `E_j` is empty, do not normalize, create a fallback partition, or record a completed clustering event; synchronization remains incomplete until observations are available. If `E_j` is nonempty and all history magnitudes are zero, record the no-information condition and use exactly one singleton cluster per eligible sensor, marked `partition_basis = all_zero_history_fallback`; do not run greedy merging.
-5. Create one event-level normalization snapshot per completed synchronization, shared across all alpha candidates. Store each candidate's alpha-specific partition, cluster assignments, quality, and counts in a separate evaluation linked to that snapshot.
-6. Partition quality must implement the source cluster-quality and partition-quality definitions from Section 1.4 exactly, including the alpha-dependent cluster-size term.
-7. The incremental merge procedure must follow Algorithm 1.4.1: begin with singleton clusters, repeatedly select the current worst-quality cluster, merge it with the partner producing the smallest merged-cluster quality, retain each candidate partition, and stop at exactly two clusters for `n >= 2`. Select the retained partition with minimum partition quality; never generate a one-cluster candidate when `n >= 2`. A single eligible sensor is already its only candidate. Project tie rules use lexicographically sorted string-ID clusters for equal-quality worst clusters/partners and the earliest retained candidate for equal-quality partitions, comparing unrounded values without near-equality tolerances.
-8. FMIC must use the source first-moment weighting/allowance calculation.
-9. SMIC must use the source second-moment weighting/allowance calculation based on the first moment plus the conservative second-moment term.
-10. Coordinator allowance must be derived from member-node allowances using the source rule rather than an independently invented threshold.
-11. Formula-level unit tests must compare implementation outputs for history, normalization, cluster quality, merge selection, FMIC/SMIC weights, node allowances, and coordinator allowances against hand-calculated examples.
+1. History initializes at zero and updates for each valid observation after the reference row using `h_i <- 0.5 * h_i + (v_i(t) - v_i(t_j))`. The synchronization-reference row does not create an artificial zero-deviation history update.
+2. History uses signed change from the active synchronization reference, never prior-minute change.
+3. On a synchronization row, update history against the reference active on row entry, use the resulting history for clustering, and then install the new reference for subsequent rows.
+4. Histories persist across synchronization and are not reset.
+5. Every Phase 3A clustering event contains the same six sensors. No online/offline eligibility logic is required in the primary path.
+6. For scalar histories, normalize with `H = max_i |h_i|`; when `H > 0`, use `a_i = h_i / H`, preserving sign and leaving raw history unchanged.
+7. If all six histories are zero, use the previously agreed singleton no-information fallback and mark it explicitly.
+8. Cluster quality is `q(pi) = (1 / |pi|) * |sum(a_i)| + alpha * |pi|`; partition quality is `Q(Pi) = max q(pi)`.
+9. Signed normalized histories are summed before the absolute value so cancellation remains possible.
+10. Algorithm 1.4.1 remains the governing greedy procedure: begin with singleton clusters, select the current worst-quality cluster, merge with the partner producing minimum merged-cluster quality, retain candidate partitions, stop at two clusters for `n >= 2`, and choose the retained partition with minimum `Q`.
+11. Existing deterministic project tie rules may remain unless a simpler source-consistent rule is explicitly approved later.
+12. FMIC uses the source first-moment weighting/allowance calculation.
+13. SMIC uses the source first-moment plus conservative second-moment weighting/allowance calculation.
+14. Coordinator allowance is derived from member-node allowances using the source rule.
+15. Formula-level tests must verify history, normalization, cluster quality, merge selection, FMIC/SMIC weights, node allowances, and coordinator allowances against hand calculations.
 
-### 6.9 Phase 3 Monitoring And Membership Policies
-#### Approach A — matched fixed-cohort comparison
-1. Hold the sensor cohort constant, not the set of observed contributors. At each row, compute the mean of valid observations from that cohort divided by the observed contributor count; do not fill missing values.
-2. Synchronize whenever the observed contributor set changes; Phase 3 reclusters on completion and activates new state next row. Availability changes are not suppressed because the cohort is fixed.
-3. Reuse the existing Phase 2 engine with the same cohort, observed readings, timestamps, threshold, and denominator/availability policy. Sensors outside the selected cohort do not participate.
-4. Estimate the algorithm communication difference under this shared realistic policy, not an availability-free clustering effect.
-5. No minimum observed count is imposed. Zero valid readings yield an undefined global mean and threshold decision, not safe/violated labels.
-6. Explicitly test changes in the observed denominator. A fixed cohort does not make observed contributors constant or establish monitoring correctness by itself.
+### 6.10 Phase 3A Monitoring Lifecycle And Simplification
+1. Phase 3A has a fixed six-sensor cohort and complete observations on every row. Departure, return, changing eligible sets, zero-observation state, changing observed denominator, and membership-triggered synchronization do not exist in the primary execution path.
+2. Re-clustering remains event-based: initialize at the first completed synchronization and re-cluster at later completed resynchronizations according to the monitoring algorithm, not on a timer.
+3. Resulting partitions, coordinators, references, and allowances become active using the agreed next-row state timing.
+4. Each cluster uses the existing deterministic coordinator-selection rule unless a later pivot story explicitly changes it. A singleton coordinates itself.
+5. Cluster/coordinator information may travel with normal synchronization threshold updates; no duplicate standalone formation traffic is created unless the implementation actually transmits it.
+6. Node-level violations remain observable even when cluster cancellation avoids escalation.
+7. Signed cluster cancellation may suppress unnecessary escalation only when the monitored global condition remains correct.
+8. Root/global state after escalation or synchronization must agree with the matched non-clustered calculation for the same Phase 3A observations.
+9. Availability-aware branches already built may be retained for optional Phase 3B, but Phase 3A code should remove or isolate them so they do not complicate the primary path.
 
-#### Observed-contributor changes — shared policy, not a separate experiment
-1. Treat departure/return handling as a shared availability policy, distinct from the clustering algorithm but required in every compared run.
-2. A sensor with no usable reading must not receive a fabricated zero-change history update.
-3. Detect departure on the first bucket without a valid reading after Phase 1 freshness filtering, and return on the first subsequent valid reading. Each departure/return triggers synchronization; reclustering occurs on its completion.
-4. When a sensor returns, perform the required synchronization/re-entry handling before resuming its history updates or cluster participation.
-5. Attribute requests, responses, and broadcasts caused by membership change to that synchronization cause while retaining their normal transmission-type counts. Cluster/coordinator information travels with threshold updates; do not add duplicate formation/reassignment traffic.
-6. Compare FMIC/SMIC only against the matched Phase 2 run using the same departure/return and availability assumptions. Do not generate identical fixed/dynamic variants or a no-availability-sync comparator.
-7. Compute the global mean from currently active sensors with valid readings, using the observed active count as the denominator. There is no minimum active-sensor count.
-8. With zero valid readings, record undefined global mean/threshold decision; no sensor value or safe/violated label is fabricated. Observation-dependent synchronization cannot complete until valid readings are available.
+### 6.11 Phase 3A Production Output And Reproducibility
+Normal Phase 3A output is compact and event-oriented.
 
-#### Event-based clustering lifecycle and coordinators
-1. Cluster at initial synchronization and recluster at every later completed resynchronization, including monitoring-triggered, scheduled negative-margin, and observed-contributor-change synchronization. There is no periodic clustering schedule; a cluster check alone does not trigger reclustering.
-2. Each clustering event records the synchronization event/cause, histories used, partition, coordinator assignments, and activation row. Updated partitions, coordinators, references, and allowances apply starting on the next row.
-3. Initialize each sensor's accumulated history to zero at the first completed synchronization. On later eligible rows, update history using the reference active on row entry before clustering or synchronizing. A completed synchronization uses the updated history for its partition, then establishes references that become active on the next row; it does not reset histories. Missing/offline rows leave history unchanged. A returning sensor retains its accumulated history but does not update it from a stale reference; its return synchronization establishes a current reference before updates resume on the next eligible row. Zero-observation rows do not update history or complete clustering.
-4. Assign a monotonically increasing synchronization ID to each completed event and retain it with every reference it establishes. Export both event snapshots and a normalized long-form row-by-sensor audit for every input bucket, including missing sensors and rows without synchronization. The trace must include observed value, entry reference and its synchronization ID, pre-history, signed deviation, post-history, update status, and a reason when skipped. Event snapshots alone do not provide the required update-level audit; they remain the exact clustering inputs.
-5. All-zero histories use the deterministic singleton fallback, including at initialization. No observation-dependent synchronization or fabricated cluster/coordinator assignment is completed when there are zero valid observations.
-6. At clustering, choose each cluster's highest-ID available member as coordinator; a singleton coordinates itself. Document deterministic ID ordering, including numeric versus string representation, and record old/new assignments when they change.
-7. Cluster formation/reassignment information is included with new thresholds in normal synchronization updates, with zero additional standalone formation/reassignment transmissions. Transmission types and event causes are separate accounting views, not additive duplicate totals.
+Do not persist by default:
+1. one sensor-history row per sensor per minute;
+2. every rejected merge candidate;
+3. every merge-partner score;
+4. every intermediate partition and cluster quality for every synchronization and alpha;
+5. exhaustive nested JSON for deterministic search paths;
+6. availability fields that cannot occur in Phase 3A.
 
-#### Cluster monitoring correctness
-1. A node-level warming/local-constraint violation must always be detected and logged even when later cluster cancellation prevents escalation to the root.
-2. Signed cluster averaging is allowed because cancellation is the intended clustering mechanism, but it may not conceal a violation of the monitored global threshold.
-3. If individual-sensor warming is reported as a separate safety signal, that signal remains independent of the cluster-average decision and cannot be canceled by another sensor's cooling.
-4. Root/global state after any escalation or synchronization must match the state that would be obtained under the corresponding non-clustered reference calculation for the same available sensors.
+At clustering events, retain at minimum:
+1. event/synchronization identifier;
+2. timestamp;
+3. algorithm;
+4. alpha;
+5. raw histories used for clustering;
+6. normalized histories;
+7. selected partition;
+8. selected partition quality;
+9. cluster count;
+10. coordinator assignments.
 
-### 6.10 Phase 3 Alpha Policy
-1. `alpha=0.10` is a baseline design choice only; do not describe it as optimal for the temperature data.
-2. Required coarse sensitivity grid: `0.05, 0.10, ..., 0.95` for both FMIC and SMIC.
-3. For each alpha, retain cluster assignments, number of clusters, cluster-size distribution, root escalations/synchronizations, coordinator checks, and communication totals by type.
-4. Report the full sensitivity curve/table and identify the minimum-communication alpha only after the sweep.
-5. If useful, a second local refinement (for example 0.01 spacing around the best region) may be run, but it supplements rather than replaces the required coarse sweep.
+A detailed debug mode may emit deeper traces for synthetic cases or small samples, but it is off by default for full-data runs.
 
-### 6.11 Phase 3 Synthetic Correctness Test Suite
-The following tests must pass before full-data performance comparisons:
-1. Single-sensor warming while the global mean remains below threshold: local warming trigger is detected; global violation is not falsely declared.
-2. Warming/cooling cancellation that safely keeps the global mean below threshold: cluster handling may avoid root escalation while logging the local event.
-3. Partial cancellation where the global mean still crosses the threshold: cluster logic must escalate/detect the global violation.
-4. Sensor unavailable: global denominator/state and membership behavior follow the declared policy; no synthetic zero change is inserted.
-5. Sensor returns: required re-entry synchronization occurs before stale history/reference state can be reused.
-6. Multiple clusters with one coordinator violation: escalation path and resulting root state are correct.
-7. Boundary cases: just below, exactly at, and just above every relevant node/coordinator/global boundary follow the declared `<` versus `>=` convention.
-8. Hand-counted communication scenario with 2–4 sensors: every request, response, trigger, cluster check, root escalation, synchronization broadcast, membership message, and reassignment message reconciles exactly to the expected count.
-9. History across multiple resynchronizations: accumulated history is retained rather than reset, and subsequent valid updates use the new synchronization reference.
-10. Lifecycle/coordinator cases: initialization, consecutive resynchronizations, no-resync intervals, next-row activation, highest-ID selection independent of input order, singleton fallback, and coordinator departure/return.
-11. Availability cases: fixed-cohort contributor/denominator changes, first-missing-bucket departure/return, one valid reading, and zero valid readings with undefined global state. Include a low-valued sensor departure that raises the mean above threshold without warming by any remaining sensor, and a returning sensor that changes the denominator.
-12. Bundled traffic and online-only synchronization: cluster/coordinator data adds no standalone transmissions to threshold updates; known offline sensors receive no requests or updates and generate no responses.
+Reproducibility is satisfied when a researcher can regenerate the reported results from the original aligned input, experiment configuration, Phase 3A threshold row, implementation code/notebook, deterministic algorithms, focused tests, and compact output artifacts. Persisting every deterministic intermediate state is not required.
 
----
+### 6.12 Phase 3A FMIC/SMIC Build Strategy
+1. Implement FMIC first as the first complete Phase 3A clustering-monitoring algorithm.
+2. Validate FMIC formula outputs and end-to-end behavior before SMIC results are interpreted.
+3. Add SMIC through the same monitoring engine. Do not create a second monitoring architecture.
+4. Shared behavior includes observations, history, normalization, clustering, synchronization timing, coordinator behavior, communication counting, outputs, and common correctness tests.
+5. The principal algorithm-specific difference is the source-defined weight/allowance calculation.
+
+### 6.13 Phase 3A Alpha Policy
+1. Alpha is a dataset-specific tuning parameter, not the primary research question.
+2. Use `alpha=0.10` as an initial implementation value only.
+3. Do not run the full alpha grid until FMIC and SMIC are each correct end-to-end.
+4. After correctness is established, run a compact coarse grid `0.05, 0.10, ..., 0.95` to identify a reasonable dataset-specific setting.
+5. The minimum required tuning record is `algorithm`, `alpha`, `total_messages`, and `correctness_pass`; compact cluster-count/root-sync metrics may be added if useful.
+6. Do not persist the full internal merge-search path for every alpha.
+7. Select or discuss a preferred alpha only among configurations that pass correctness tests.
+8. Do not present the selected alpha as a universal optimum.
+
+### 6.14 Phase 3A Synthetic Correctness Test Suite
+The Phase 3A suite must document the setup, expected result, and failure interpretation for each case.
+
+1. **History recurrence test:** hand-calculate history across multiple observations and synchronization intervals. Confirms signed deviation from the active reference, 0.5 discounting, persistence across synchronization, and reference replacement.
+2. **Normalization test:** use positive, negative, zero, tied-maximum, and all-zero histories. Confirms signed scaling, raw-state preservation, and deterministic zero-history fallback.
+3. **Clustering test:** hand-calculate `q`, `Q`, worst-cluster choice, partner choice, merge sequence, retained partitions, and final selected partition for a small sensor set.
+4. **FMIC weight/allowance test:** hand-calculate first-moment weights, node allowances, and coordinator allowance.
+5. **SMIC weight/allowance test:** hand-calculate first moment, second moment, conservative second-moment component, node allowances, and coordinator allowance.
+6. **Safe cancellation test:** one node warms and another cools enough for the monitored global condition to remain safe. Local activity remains observable while unnecessary root escalation may be avoided.
+7. **Unsafe partial-cancellation test:** cooling is insufficient; coordinator/root escalation must occur and a true global violation cannot be concealed.
+8. **Boundary test:** values just below, exactly at, and just above every relevant node, coordinator, and global boundary follow the declared `<` versus `>=` convention.
+9. **Communication accounting test:** a hand-counted 2–4 sensor example reproduces every trigger, request, response, coordinator escalation, synchronization request/response, and broadcast exactly.
+10. Availability/offline tests are not Phase 3A gates. They may be retained for optional Phase 3B.
+
+### 6.15 Phase 3B Optional Availability Robustness
+Phase 3B may later exercise the broader availability-aware design using the full dataset. Candidate scope includes sensor departure/return, changing observed contributors, re-entry synchronization, retained history through outages, changing coordinators, zero-observation states, and availability-related traffic attribution.
+
+No Phase 3B implementation, test, or output is required for Phase 3A completion. Existing availability-aware code and historical user stories may be reused if Phase 3B is approved later.
 
 ## 7) Metrics And Evaluation
 
-### 7.1 Label Definitions
-1. Actual positive minute: observed_global_average >= p90 (canonical aligned output rule).
-2. Predicted positive minute for current Phase 2 diagnostics: `event_resync_performed == 1`. `event_any_sensor_requested_resync` remains the distinct local-request trace. Initialization/membership synchronization is operational activity, not proof of global violation.
-3. Any diagnostic variant boundary comparison must be flagged as non-canonical in output metadata.
-4. Under the Phase 3 observed-only protocol and its matched comparators, a zero-observation bucket has undefined actual global label, not a negative label. Report such buckets separately rather than treating them as safe in diagnostic metrics.
+### 7.1 Phase 2 Historical Metrics
+Existing Phase 2 diagnostic definitions remain valid for the historical full-data run. Synchronization-based precision/recall remain operational diagnostics rather than measures of actual warning accuracy.
 
-### 7.2 Communication Metrics
-1. Distributed total messages: sum of total_message_count.
-2. Distributed category totals: trigger, request, response, broadcast message sums.
-3. Centralized baseline sensor messages: buckets * sensor_count.
-4. Primary communication reduction ratio:
-   1 - distributed_total_messages / centralized_sensor_messages.
-5. Legacy comparator ratio (for backward comparability):
-   1 - distributed_trigger_messages / centralized_sensor_messages.
-6. The configured-cohort baseline above is a counterfactual, not actual offline traffic. Also report `centralized_observed_sensor_messages = sum(observed_online_sensor_count)` and `communication_reduction_ratio_observed = 1 - distributed_total_messages / centralized_observed_sensor_messages`; this ratio is undefined if no readings exist.
+### 7.2 Phase 3A Correctness Outcome
+For each Phase 3A algorithm/configuration:
+1. actual global condition is evaluated from the six-sensor observed mean using the Phase 3A p90 and canonical boundary rule;
+2. no selected-sensor observation is missing, so every Phase 3A bucket is globally evaluable;
+3. cluster cancellation is acceptable only if it does not conceal a true global threshold violation;
+4. correctness test status is a gate for interpreting communication savings.
 
-### 7.3 Diagnostic Classification Metrics
-1. Recall (diagnostic only): TP / (TP + FN).
-2. Precision (diagnostic only): TP / (TP + FP).
-3. Confusion counts: TP, FP, FN, TN.
-
-These remain synchronization-based legacy diagnostics: a positive prediction is
-same-row synchronization, not a local-warning flag or a root-confirmed global
-warning. `false_safe` counts globally violating rows without same-row
-synchronization; `false_alert` counts safe rows with synchronization, including
-startup/membership activity. The corrected `distributed_constraint_state` is not
-the predictor, and those counts must not be described as actual warning errors.
-
-### 7.4 Detection Delay
-Compute delay by contiguous actual-positive event windows:
-1. For each window, find first predicted-positive minute in the same window.
-2. Delay is bucket index difference from window start.
-3. Report per-window delays and summary statistics.
-
-The hit is the first synchronization, not a local-warning event. Undefined global
-rows break windows. This task changes neither the legacy calculations nor their
-predictor.
-
-### 7.5 Phase 3 Communication Accounting
-Report both source-comparable totals and diagnostic detail.
-
-Required message categories:
-1. routine node/local-trigger messages,
-2. cluster collection/check requests,
-3. cluster collection/check responses,
-4. coordinator-to-root escalation messages,
-5. root synchronization requests,
-6. synchronization responses,
-7. synchronization broadcasts/constraint updates,
-8. standalone membership departure/return messages, only when actually transmitted,
-9. standalone coordinator reassignment/re-clustering messages (zero under the bundled-update protocol),
-10. total messages.
+### 7.3 Phase 3A Communication Metrics
+Report actual transmission counts by category:
+1. node/local-trigger messages;
+2. cluster collection/check requests;
+3. cluster collection/check responses;
+4. coordinator-to-root escalation messages;
+5. root synchronization requests;
+6. synchronization responses;
+7. synchronization broadcasts/constraint updates;
+8. total messages.
 
 Rules:
-1. A message is one transmission between distinct nodes/components; do not collapse a request and response into one event.
-2. Category totals must reconcile exactly to the overall total.
-3. For comparison with the source paper, also report a broadcast-style aggregate using one consistent definition documented in run metadata.
-4. Phase 2, FMIC, and SMIC comparisons must use the same sensor-availability assumptions for the comparison being made.
-5. Online/offline status is known without messages. Requests, responses, and threshold updates involve only currently online sensors; no communication is sent unnecessarily to offline sensors.
-6. Include cluster/coordinator information with normal synchronization threshold updates. Count the enclosing transmission once; no extra standalone formation/reassignment message is generated.
-7. Record initialization, monitoring, and membership-change causes on synchronization traffic. Cause attribution is a separate view of transmission-type totals; do not sum overlapping views into total messages.
-8. Use the same counting rules for initialization and all resynchronization causes. Local computation, absence detection, and coordinator selection are not themselves network transmissions.
+1. one message is one transmission between distinct nodes/components;
+2. requests and responses are separate messages;
+3. category totals reconcile exactly to total messages;
+4. local computation and coordinator selection are not messages by themselves;
+5. no membership-change message categories are required in Phase 3A because membership is fixed;
+6. for source comparison, a documented broadcast-style aggregate may also be reported if useful.
 
-### 7.6 Phase 3 Attribution Metrics
-For each algorithm and alpha report:
-1. total messages,
-2. routine monitoring messages,
-3. cluster-check messages,
-4. root escalation/synchronization messages,
-5. membership-management messages,
-6. coordinator reassignment/re-clustering events and their zero standalone-message count under bundled updates,
-7. communication reduction versus the matched Phase 2 baseline,
-8. communication reduction versus centralized all-sensor-every-minute messaging,
-9. number of node violations,
-10. number of coordinator violations,
-11. number of root/global synchronizations,
-12. cluster count and cluster-size distribution.
+### 7.4 Phase 3A Comparison Metrics
+For the matched Phase 2, FMIC, and SMIC runs report at minimum:
+1. total messages;
+2. communication totals by relevant type;
+3. communication reduction versus the matched Phase 2 baseline for FMIC/SMIC;
+4. communication reduction versus a centralized six-sensor-every-minute baseline;
+5. node/local violations;
+6. coordinator checks and violations for clustered algorithms;
+7. root/global synchronizations or escalations;
+8. selected cluster count and cluster-size summary for FMIC/SMIC;
+9. correctness-pass status.
 
-Primary attribution comparison:
-`algorithm difference under Approach A = matched Phase 3 result - matched Phase 2 result`.
+The centralized Phase 3A sensor-message baseline is `19,984 * 6 = 119,904` one-way sensor transmissions if defined as one transmission per sensor per minute. Any alternative centralized counting convention must be named explicitly and applied consistently.
 
-Availability-related costs are reported by cause, not as a required fixed-versus-dynamic ablation. Subtracting cause-attributed traffic does not recover a no-availability-change counterfactual: synchronizations also change references, history evolution, and partition timing.
+### 7.5 Alpha Tuning Metrics
+Alpha tuning is implementation calibration, not a separate scientific objective. The minimum retained tuning table is:
+- algorithm;
+- alpha;
+- total messages;
+- correctness-pass status.
 
-Membership-triggered synchronization costs are attributed by cause even though they use normal synchronization request/response/update messages. Cluster information bundled into those updates does not add another message total.
+Optional compact fields include root synchronizations and cluster count. Do not require full merge traces or per-alpha forensic state.
+
+### 7.6 Phase 3B Metrics (Optional)
+If Phase 3B is later approved, availability-specific metrics and cause attribution may be reintroduced. They are not Phase 3A acceptance requirements and must not be mixed into the stable-cohort primary result.
 
 ---
 
 ## 8) Quality Gates And Acceptance
 
 ### 8.1 Transformation Gates (Phase 1)
-Existing Phase 1 quality gates remain unchanged and must pass before Phase 2.
+Existing Phase 1 transformation gates remain unchanged. The Phase 3A addition is limited to a validated cohort-specific statistics row derived from the aligned Phase 1 output.
 
-### 8.2 Phase 2 Acceptance Outputs
-A Phase 2 run is considered complete when:
-1. artifacts/phase2_temperature_sensors.csv is produced.
-2. deterministic state fields are populated consistently.
-3. communication and diagnostic metrics are exported.
-4. run settings and threshold provenance are logged.
-5. Machine-readable metrics retain the full-precision computational p90 threshold and its source artifact/series/column, alongside the existing rounded presentation value.
-6. The headline communication reduction uses one centralized transmission per observed sensor per bucket. Configured-all-sensor and trigger-only legacy comparisons retain existing names/values but are labeled secondary compatibility comparisons.
-7. Input loading preserves empty CSV fields as missing observations, rejects malformed/non-finite temperature values with column/bucket context, and does not turn invalid text into a membership event.
+### 8.2 Phase 3A Input And Threshold Gates
+Before matched Phase 2 or clustered runs:
+1. sensors are exactly A, C, D, E, F, and G;
+2. approved timestamps match the locked interval;
+3. exactly 19,984 buckets are present;
+4. both interval endpoints are inclusive and every adjacent timestamp differs by exactly 60 seconds;
+5. every selected sensor has a valid finite value in every bucket;
+6. no imputation is present;
+7. the Phase 3A p90 is recomputed programmatically from the six-sensor mean and recorded in `phase1_average_statistics.csv`;
+8. all Phase 3A algorithms read the same full-precision threshold value.
 
-Recall is reported for diagnostics and trend tracking, but is not a hard pass/fail gate.
+### 8.3 Matched Phase 2 Baseline Gate
+1. Reuse the existing Phase 2 engine.
+2. Run only the approved cohort/interval with the Phase 3A p90.
+3. Membership-change behavior must remain inactive for the entire run.
+4. Communication totals reconcile.
+5. Existing Phase 2 correctness checks relevant to stable operation pass.
+6. This matched result, not the historical full-data Phase 2 total, is the comparator for FMIC/SMIC.
 
-### 8.3 Phase 3 Acceptance Gates
-Phase 3 may proceed to full-data comparison only when:
-1. Phase 2 reference behavior has passed the targeted correctness tests used as the non-clustered comparator.
-2. FMIC passes all synthetic correctness and formula-level tests before SMIC results are interpreted.
-3. SMIC independently passes all synthetic correctness and formula-level tests.
-4. No synthetic test shows a global threshold violation concealed by cluster cancellation.
-5. History, partition, merge, allowance, and coordinator calculations match hand-calculated/source-aligned expectations.
-6. Communication categories reconcile exactly to total messages.
-7. All comparisons use the same Approach A cohort, observations, threshold, timestamps, and availability-triggered synchronization policy, with explicit cause attribution.
-8. The alpha sensitivity sweep is complete for each algorithm before a preferred alpha is named.
+### 8.4 Phase 3A Clustering Gates
+Phase 3A may proceed to final comparison only when:
+1. source-aligned history and normalization tests pass;
+2. partition-quality and greedy-merge tests match hand calculations;
+3. FMIC passes formula-level and end-to-end correctness tests before SMIC is interpreted;
+4. SMIC independently passes its formula-level and end-to-end correctness tests;
+5. no synthetic cancellation test hides a true global threshold violation;
+6. boundary tests pass;
+7. communication categories reconcile exactly to total messages;
+8. production output excludes unnecessary full-run audit traces and remains manageable;
+9. FMIC and SMIC use the same monitoring architecture except for intended weight/allowance calculations;
+10. only correctness-passing alpha configurations may be considered for tuning or preferred-result reporting.
+
+### 8.5 Phase 3B Gate (Optional)
+No Phase 3B gate blocks Phase 3A completion. Phase 3B begins only after separate approval and may reuse the earlier availability-aware requirements as a starting point.
 
 ---
 
 ## 9) Verification Checklist
 
-### 9.1 Phase 2
-1. aligned_phase1_temperature.csv ingestion is explicit and reproducible.
-2. p90 is read from phase1_average_statistics.csv each run.
-3. phase2 output includes per-sensor reference and local-deviation fields per row.
-4. local trigger semantics and boundary policy are explicitly logged for the run.
-5. state update timing (apply on next row) is respected, including negative-delta scheduling.
-6. communication category counts reconcile with total_message_count per row and in aggregate.
-7. old multivariate Phase 2 references are removed from Phase 2 sections.
-8. metrics definitions match deterministic rule outputs.
-9. Independent unrounded/CSV trace replay validates means, references, allowances, entry/exit continuity, membership, pending causes, local comparison coverage, triggers, and messages.
-10. Synthetic cases cover safe warming, signed and partial cancellation, multiple triggers, local/global boundaries, cooling recovery, unequal three/four-sensor states, and reporting-only forced-row violations. Corruption tests prove validation rejects inconsistent fields.
+### 9.1 Phase 2 Historical Implementation
+1. Existing full-data Phase 2 artifacts remain preserved.
+2. Existing state-machine and communication validation remain part of project history.
+3. Historical availability-aware behavior is not used as the primary Phase 3A comparator.
 
-### 9.2 Phase 3
-1. Phase 2 comparator passes correctness tests before Phase 3 comparison.
-2. The US-3.2 implementation cells in `scripts/build_phase3_temperature_clustering.ipynb` pass hand-calculated tests for initialization, active-reference updates, synchronization-row ordering, multiple resynchronizations, offline/return handling, and zero-observation rows, including the minimum `0.40 / 20.0 / 20.2, 20.5, 20.3` example.
-3. History updates use the active synchronization reference, not prior-minute difference; signed positive, negative, and alternating deviations remain signed, and no missing reading is silently interpreted as zero change or discounted in the absence of an observation.
-4. `artifacts/phase3_sensor_history_trace.csv` contains one record per sensor per input bucket, with enough state to reproduce each update and explicit reasons for skipped updates; synchronization and reference IDs link row audit records to the events that established their references.
-5. Normalization uses exactly the selected-cohort sensors online with valid observations at the completed synchronization; the resulting partition contains the same set. Empty eligibility defers clustering without a fallback, while nonempty all-zero eligibility produces the marked singleton fallback.
-6. One event-level normalized history snapshot is shared across alpha candidates; each candidate's partition and quality results are stored separately and preserve the complete alpha sweep.
-7. Partition quality and greedy merge choices match hand calculations on small examples, including signed cancellation, all retained candidates, stopping at two clusters, earlier-candidate selection, deterministic ties, empty/singleton/pair/all-zero cases, and event/alpha audit replay. The existing event CSV retains separate alpha evaluations in `alpha_clustering_evaluations`; no new output file is needed.
-8. FMIC and SMIC allowance calculations are tested separately.
-9. Node trigger, coordinator check, and root escalation are distinguishable in outputs.
-10. Local warming detection remains observable even when cluster cancellation prevents root escalation.
-11. Global violations are identical to matched reference calculations under the same availability assumptions.
-12. Matched algorithm totals and overlapping cause-attribution totals are not pooled or presented as separate fixed/dynamic experiments.
-13. All Phase 3 message categories reconcile to the overall total.
-14. Alpha sensitivity outputs preserve every tested alpha, not just the best-performing setting.
-15. Clustering occurs at initialization and every completed resynchronization, never on a timer, with new state active on the next row.
-16. Accumulated histories survive resynchronization, and coordinator selection follows highest available sensor ID.
-17. Zero-observation global state remains undefined, and offline sensors generate no traffic because availability is known without communication.
-18. Bundled cluster/threshold updates are counted once; cause-attribution views reconcile without duplicate traffic.
+### 9.2 Phase 3A Experiment Setup
+1. Locked cohort is A, C, D, E, F, G.
+2. Locked interval is `2022-02-24T18:50:00+00:00` through `2022-03-10T15:53:00+00:00`.
+3. Row count is 19,984.
+4. Complete observations are verified for all six sensors on every row.
+5. Phase 3A p90 is calculated from this exact population and added to `phase1_average_statistics.csv` without overwriting existing statistics.
+6. A minimal `phase3a_experiment_config.json` or equivalent records the locked cohort, interval, expected row count, and threshold source.
+
+### 9.3 Matched Phase 2 Baseline
+1. Existing Phase 2 code is reused.
+2. It reads the Phase 3A cohort/interval and p90.
+3. No membership transition occurs.
+4. Stable-run communication totals reconcile.
+5. The output is clearly identified as the Phase 3A matched Phase 2 comparator.
+
+### 9.4 Phase 3A Clustering Foundation
+1. History updates use the active synchronization reference and retain sign.
+2. History survives synchronization and uses the new reference afterward.
+3. Normalization is signed, non-destructive, and calculated over all six stable sensors.
+4. Initial all-zero history uses the explicit deterministic fallback.
+5. Cluster quality and partition quality match the source formulas.
+6. Greedy merging matches hand-calculated examples and stops/selects partitions as specified.
+7. Availability-specific branches do not complicate the Phase 3A primary path.
+
+### 9.5 Phase 3A FMIC/SMIC
+1. FMIC weights and allowances match hand calculations.
+2. FMIC passes end-to-end tests before SMIC comparison.
+3. SMIC first/second-moment calculations and allowances match hand calculations.
+4. SMIC uses the shared monitoring architecture rather than a parallel implementation.
+5. Node activity, coordinator checks, and root escalation are distinguishable.
+6. Safe cancellation can reduce escalation without hiding global violation.
+7. Unsafe partial cancellation escalates correctly.
+8. Node/coordinator/global boundary tests pass.
+9. Communication accounting matches the hand-counted synthetic example.
+
+### 9.6 Phase 3A Outputs And Reproducibility
+1. No full sensor-by-minute production history trace is required.
+2. No exhaustive per-alpha merge-search JSON is required.
+3. Clustering-event output retains raw/normalized histories, selected partition, quality, cluster count, coordinator, algorithm, alpha, timestamp, and event ID.
+4. `phase3a_results.csv` or equivalent supports the matched Phase 2/FMIC/SMIC comparison and compact alpha tuning.
+5. Debug traces are opt-in and small.
+6. The run can be reproduced from source data, config, threshold statistics, code/notebook, tests, and compact outputs.
+
+### 9.7 Phase 3B (Optional)
+1. Phase 3B requirements are not evaluated as part of Phase 3A completion.
+2. If later approved, the earlier availability-aware stories may be reviewed and revised before reuse rather than assumed to remain automatically authoritative.
 
 ---
 
 ## 10) Sensitivity Matrix (Required Reruns)
 
 ### 10.1 Phase 2 Sensitivity
-Run at least these variants:
-1. Trigger threshold source series: all_devices_observed vs observed-only fallback baselines.
-2. Initial state option: row1 xbar vs first non-null xbar fallback.
-3. Boundary sensitivity check: strict > vs inclusive >= (diagnostic comparison only, non-canonical output).
-4. Local allowance assignment policy (for example equal allowance vs normalized alternatives).
+The historical Phase 2 sensitivity work remains available for reference but is not a prerequisite for the Phase 3A matched comparison unless a specific issue requires rerunning it.
 
-Report for each variant:
-1. distributed total messages and category totals,
-2. communication reduction ratio,
-3. diagnostic recall and precision,
-4. delay distribution,
-5. missed event windows (if any).
+### 10.2 Phase 3A Alpha Tuning
+After FMIC and SMIC each pass end-to-end correctness at the baseline alpha, run the coarse grid:
 
-### 10.2 Phase 3 Alpha Sensitivity
-For FMIC and SMIC separately, run alpha values:
-`0.05, 0.10, 0.15, ..., 0.95`.
+`0.05, 0.10, 0.15, ..., 0.95`
 
-For every alpha report:
-1. cluster assignments or a reproducible cluster-membership trace,
-2. number of clusters and cluster-size distribution,
-3. node violations,
-4. coordinator checks and coordinator violations,
-5. root/global escalations and synchronizations,
-6. total messages and every message category,
-7. communication reduction versus matched Phase 2,
-8. monitoring correctness outcomes and any missed/late global events.
+For each algorithm/alpha retain only compact tuning evidence required to choose a reasonable dataset-specific setting:
+1. alpha;
+2. total messages;
+3. correctness-pass status;
+4. optionally root synchronizations and cluster count.
 
 Interpretation:
-1. alpha=0.10 is a baseline, not a claimed optimum.
-2. The preferred alpha may be identified empirically only after viewing the complete sensitivity results.
-3. If the response is irregular or the minimum occurs between coarse-grid values, a secondary 0.01-step refinement may be added around the promising region.
+1. alpha is a tuning parameter, not the primary research question;
+2. `alpha=0.10` is an initial implementation value, not a claimed optimum;
+3. only correctness-passing configurations may be considered;
+4. do not require a finer sweep unless the team later decides it adds value;
+5. do not preserve full internal search traces for every alpha.
 
-### 10.3 Phase 3 Availability Attribution
-For each selected FMIC/SMIC configuration, report:
-1. matched Phase 2/FMIC/SMIC totals under Approach A, and
-2. departure/return events, completed availability-triggered synchronizations, coordinator changes, and their cause-attributed traffic.
+### 10.3 Phase 3A Primary Comparison
+After tuning, produce the matched comparison using the same cohort, interval, threshold, observations, boundary convention, and counting rules:
+1. stable-cohort Phase 2;
+2. stable-cohort FMIC;
+3. stable-cohort SMIC.
 
-Do not claim this decomposition measures an availability-free clustering effect. No fixed/dynamic ablation or stable-availability subset experiment is required; either would need a separately agreed protocol.
+### 10.4 Phase 3B Availability Robustness (Optional)
+No availability sensitivity or attribution run is required for Phase 3A. If Phase 3B is approved later, define its experiment separately rather than treating it as a hidden extension of Phase 3A.
 
 ---
 
 ## 11) Deliverables
 
 ### Code And Execution
-1. scripts/build_phase1_temperature.py (existing).
-2. scripts/build_phase2_temperature_sensors.ipynb (required baseline implementation).
-3. scripts/build_phase3_temperature_clustering.ipynb (Phase 3 implementation notebook, adapted from the Phase 2 notebook; FMIC and SMIC implementation will be added here).
-4. scripts/test_phase3_history.py (hand-calculated regression harness that executes the US-3.2 implementation cells from the Phase 3 notebook).
-5. Synthetic correctness/unit-test artifact for Phase 2/FMIC/SMIC logic.
+1. `scripts/build_phase1_temperature.py` — existing transformation, with minimal statistics extension if that is the current statistics-generation location.
+2. `scripts/build_phase2_temperature_sensors.ipynb` and `scripts/phase2_monitoring.py` — existing Phase 2 implementation reused for the matched Phase 3A baseline.
+3. `scripts/build_phase3_temperature_clustering.ipynb` — existing Phase 3 clustering foundation simplified for stable-cohort Phase 3A and extended with FMIC/SMIC.
+4. Focused Phase 3A synthetic/formula-level test harness. Existing test files may be refactored or supplemented rather than multiplied unnecessarily.
 
-### Data Artifacts
-1. artifacts/aligned_phase1_temperature.csv.
-2. artifacts/phase1_average_statistics.csv.
-3. artifacts/phase2_temperature_sensors.csv.
-4. artifacts/phase2_temperature_metrics.json.
-5. artifacts/phase3_sensor_history_events.csv and artifacts/phase3_sensor_history_trace.csv, plus later Phase 3 row/cluster trace artifacts sufficient to reproduce history updates and snapshots, cluster assignments, node/coordinator/root events, and message counts.
-6. Phase 3 alpha sensitivity summary for FMIC and SMIC.
-7. Phase 3 matched Approach A comparison and availability cause-attribution summary.
-8. Phase 3 synthetic correctness test results.
+### Data And Result Artifacts
+Target Phase 3A artifacts are intentionally small:
+1. existing `artifacts/aligned_phase1_temperature.csv`;
+2. existing `artifacts/phase1_average_statistics.csv` plus the new Phase 3A statistics row;
+3. `phase3a_experiment_config.json` or equivalent minimal config;
+4. matched stable-cohort Phase 2 result artifact;
+5. `phase3a_cluster_events.csv`;
+6. `phase3a_results.csv`;
+7. Phase 3A synthetic/unit-test results.
+
+Detailed debug traces are optional and are not produced by default. Avoid duplicate summary files unless they provide a clear human-use case.
 
 ### Documentation
-1. Updated project plan.
-2. Updated run instructions.
-3. Metrics interpretation notes and limitations.
-4. Phase 3 source-alignment notes referencing `140516editor Book Chapter (Last Version).pdf`, Section 1.4 / Algorithms 1.4.1–1.4.2 and the moment/broadcast-count appendices, documenting any deviations.
-5. Test-case results showing correctness before communication-savings claims.
+1. Updated `Distributed_Monitoring_POC_Project_Plan.md` incorporating this pivot.
+2. `Phase_3A_Pivot_Plan.md` retained as the sponsor-approved decision record.
+3. Existing `Phase_3_User_Stories.md` retained as project history; new user stories are appended for the Phase 3A pivot rather than rewriting completed stories.
+4. Updated run instructions for deriving the Phase 3A threshold, producing the matched Phase 2 baseline, and running FMIC/SMIC.
+5. Metrics interpretation notes that clearly distinguish Phase 3A stable-node conclusions from optional Phase 3B availability robustness.
+6. Source-alignment notes referencing the definitive chapter and documenting any explicit project adaptations.
+7. Focused correctness-test results before communication-savings claims.
 
 ---
 
 ## 12) Major Risks And Mitigations
 
-1. Risk: trigger boundary too conservative or too sensitive.  
-Mitigation: use required sensitivity reruns and compare communication versus missed windows.
+1. **Risk: the stable cohort is accidentally filtered incorrectly.**  
+Mitigation: enforce the Phase 3A input contract on sensor IDs, inclusive endpoints, exact 19,984-row count, exact 60-second timestamp spacing, and complete finite observations before any monitoring begins.
 
-2. Risk: drift from the definitive chapter's methodology in implementation shortcuts.  
-Mitigation: keep the definitive chapter's precedence explicit and include formula-level verification checks for local deviation and synchronization state.
+2. **Risk: the wrong threshold population is used.**  
+Mitigation: compute the Phase 3A p90 programmatically from the approved six-sensor interval, add it as a new Phase 1 statistics row, and require matched Phase 2/FMIC/SMIC runs to read that same full-precision value.
 
-3. Risk: missing global average values at re-sync minutes.  
-Mitigation: preserve undefined global state when no valid readings exist; never fill missing temperatures or classify an undefined mean as safe. Compare only under matched observed-only availability/denominator policies.
+3. **Risk: historical availability logic continues to complicate Phase 3A.**  
+Mitigation: add a pivot user story that removes or isolates departure, return, dynamic eligibility, changing denominator, and membership-attribution branches from the Phase 3A path.
 
-4. Risk: confusion between deterministic rules and predictive modeling terminology.  
-Mitigation: keep language explicit that metrics are diagnostics on rule behavior.
+4. **Risk: drift from the definitive chapter's mathematical methodology while simplifying.**  
+Mitigation: simplify infrastructure and outputs, not the source-defined history, normalization, partition-quality, greedy-merge, FMIC, or SMIC mathematics; retain hand-calculated formula tests.
 
-5. Risk: implementation drift between notebook and plan.  
-Mitigation: enforce schema, formula, and communication-reconciliation checks in the verification checklist.
+5. **Risk: signed cancellation hides a true global threshold violation.**  
+Mitigation: require safe- and unsafe-cancellation synthetic tests and matched root/global calculations before accepting communication savings.
 
-6. Risk: treating alpha=0.10 as an established optimum.  
-Mitigation: label it as a baseline design choice and run the required 0.05–0.95 sensitivity sweep for FMIC and SMIC.
+6. **Risk: FMIC and SMIC become duplicate codebases.**  
+Mitigation: require one shared monitoring architecture with algorithm-specific weight/allowance functions.
 
-7. Risk: attributing communication changes to clustering when they are caused by departure/return synchronization or re-clustering.  
-Mitigation: use the same fixed cohort and availability-triggered synchronization policy for every algorithm, report costs by cause, and describe savings as conditional on that shared policy rather than an availability-free effect.
+7. **Risk: alpha tuning expands back into a large research subproject.**  
+Mitigation: treat alpha as calibration, validate algorithms first at one baseline value, then retain only a compact coarse-grid tuning table unless later evidence justifies more work.
 
-8. Risk: signed cancellation hides a true global threshold violation.  
-Mitigation: require synthetic cancellation tests and matched reference calculations before accepting any communication savings.
+8. **Risk: communication savings are overstated through incomplete counting.**  
+Mitigation: count actual trigger, request, response, coordinator escalation, synchronization, and broadcast transmissions separately and reconcile exactly to totals.
 
-9. Risk: stale history/reference state after missing readings or sensor return.  
-Mitigation: never inject zero change for missing data; require explicit re-entry synchronization before history resumes under Approach A.
+9. **Risk: production artifacts again become too large to inspect.**  
+Mitigation: prohibit full sensor-by-minute history traces and exhaustive merge-search records by default; retain compact event-level outputs and use debug traces only on small cases.
 
-10. Risk: incorrect reproduction of the source clustering method.  
-Mitigation: add hand-calculated tests for history discounting, normalization, partition quality, greedy merge selection, FMIC/SMIC weights, node allowances, and coordinator allowances.
+10. **Risk: reproducibility is confused with storing every intermediate state.**  
+Mitigation: define reproducibility around source data, config, threshold provenance, deterministic code, tests, and compact outputs; recompute deterministic internals when needed.
 
-11. Risk: communication savings are overstated through incomplete counting.  
-Mitigation: count actual requests, responses, broadcasts, cluster checks, and root escalations, and attribute membership/coordinator events without double-counting bundled updates. Known offline sensors generate no traffic; require exact reconciliation to total messages.
+11. **Risk: stable-cohort results are overgeneralized to intermittent sensors.**  
+Mitigation: state explicitly that Phase 3A evaluates stable node participation; reserve online/offline robustness claims for optional Phase 3B.
+
+12. **Risk: old and new user stories give AI-assisted coding contradictory instructions.**  
+Mitigation: retain historical stories but append new pivot stories with explicit Phase 3A supersession language, and point coding tasks to the pivot plan plus the relevant new story.
 
 ---
 
 ## 13) Ready-For-Build Checklist
 
-### Phase 2 Ready / Validated
-1. Phase 1 artifacts exist and pass quality checks.
-2. Phase 2 notebook exists and runs end-to-end.
-3. phase2_temperature_sensors.csv is produced with required fields.
-4. Metrics JSON is produced with communication and diagnostics.
-5. Phase 2 targeted correctness tests are documented and pass before Phase 3 performance claims are made.
+### Phase 1 / Threshold Ready
+1. Full aligned Phase 1 artifact exists and remains unchanged by the pivot.
+2. Stable cohort and interval are locked: A, C, D, E, F, G; 2022-02-24T18:50:00+00:00 through 2022-03-10T15:53:00+00:00.
+3. Exactly 19,984 complete, consecutive one-minute Phase 3A buckets are verified, with both endpoints inclusive and no timestamp gaps.
+4. `phase1_average_statistics.csv` contains the programmatically computed Phase 3A p90 row while preserving existing rows.
 
-### Phase 3 Ready
-1. Source equations/algorithm steps for history, partition quality, Algorithm 1.4.1 merging, FMIC/SMIC weights, and coordinator constraints have direct implementation tests.
-2. Fixed-membership assumptions are documented and matched to the Phase 2 comparator.
-3. Dynamic-membership departure/return rules are documented as a separate policy.
-4. Communication categories and counting rules are locked before running experiments.
-5. FMIC is validated before SMIC comparison.
-6. SMIC is independently validated before the full comparison.
-7. Required alpha sensitivity runs are complete before a preferred alpha is selected.
-8. Synthetic cancellation, offline/return, boundary, escalation, and hand-counted communication tests pass.
-9. Multivariate extension remains deferred until the temperature-only clustering results are validated and interpreted.
-10. The event-based lifecycle and highest-ID coordinator story, US-3.15 in the [Phase 3 user stories](Phase_3_User_Stories.md), passes its acceptance tests.
-11. The agreed observed-only denominator, undefined-state, retained-history, and bundled-message rules are implemented and tested against matched comparators.
+### Matched Phase 2 Ready
+1. Existing Phase 2 implementation runs on the Phase 3A subset without code duplication.
+2. It reads the Phase 3A p90.
+3. Membership-change behavior never activates.
+4. Communication totals reconcile.
+5. Result is labeled as the matched Phase 3A Phase 2 baseline.
+
+### Phase 3A Clustering Foundation Ready
+1. Existing history, normalization, cluster-quality, and greedy-merge logic is revalidated against hand calculations.
+2. Availability-only complexity is removed or isolated from the Phase 3A execution path.
+3. Production output no longer writes the full sensor-by-minute history trace or exhaustive merge-search records.
+4. Compact clustering-event output is defined and manageable.
+5. Debug tracing is opt-in.
+
+### FMIC Ready
+1. First-moment weights and allowances have direct tests.
+2. Coordinator allowance matches the source rule.
+3. FMIC passes safe/unsafe cancellation, boundary, and communication tests.
+4. FMIC runs end-to-end on the Phase 3A data at the baseline alpha.
+
+### SMIC Ready
+1. First- and second-moment calculations have direct tests.
+2. SMIC reuses the FMIC monitoring architecture.
+3. SMIC passes the same end-to-end correctness gates with only intended algorithm-specific differences.
+
+### Final Phase 3A Comparison Ready
+1. FMIC and SMIC both pass correctness before the alpha sweep.
+2. Compact coarse alpha tuning is complete.
+3. Preferred configurations are selected only from correctness-passing runs.
+4. Matched Phase 2, FMIC, and SMIC use identical Phase 3A cohort, interval, threshold, observations, and counting conventions.
+5. Communication totals and reduction calculations reconcile.
+6. Final outputs are small enough for direct human review.
+7. Reporting clearly states that Phase 3A does not test intermittent sensor availability.
+
+### Phase 3B Status
+Phase 3B is optional and not required for the above checklist. If approved later, define its scope and acceptance criteria separately before implementation.

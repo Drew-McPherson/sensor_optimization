@@ -4,6 +4,226 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-11-03
+
+### Excluded the temperature aggregate from Phase 1 source discovery
+- Summary:
+  - Explicitly excludes `temperature_raw.csv` by case-insensitive filename before applying the source-file limit, preserving timestamped source ordering and all transformation/deduplication logic.
+  - Adds `excluded_non_source_csv_filenames` to the production QC CSV as a JSON array, run JSON as a list, and decisions log.
+  - Adds discovery, first-wins regression, and end-to-end audit-metadata tests; documents the distinction from the standalone all-files QC investigation.
+- Affected files:
+  - scripts/build_phase1_temperature.py
+  - scripts/test_phase1_source_discovery.py
+  - scripts/README.md
+  - artifacts/README.md
+  - artifacts/raw_index.csv (regenerated)
+  - artifacts/aligned_phase1_temperature.csv (regenerated)
+  - artifacts/transformation_qc_report.csv (regenerated)
+  - artifacts/phase1_average_statistics.csv (regenerated)
+  - artifacts/transformation_decisions.md (appended)
+  - config/phase3a_experiment_config.json (normal Phase 1 threshold refresh)
+  - artifacts/phase1_duplicate_qc/phase1_source_exclusion_comparison.json (generated)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Removes the known non-source aggregate from transformation input while retaining the timestamped raw sources and unchanged first-observation deduplication.
+  - Excluded filenames are recorded only when present and are not confused with files omitted by a smoke-test limit.
+- Validation and results:
+  - `python -B scripts/build_phase1_temperature.py --enforce-gates` completed with exit code 0; all four quality gates passed.
+  - Processed 3,471 timestamped sources: 9,909,343 temperature rows before deduplication, 9,899,253 unique temperature keys, and 10,090 excess duplicate rows. The duplicate-row rate is 0.101823% versus the 0.5% maximum.
+  - QC CSV, stdout JSON, and the appended decisions log record `["temperature_raw.csv"]` as the excluded non-source filenames.
+  - The regenerated aligned CSV has exactly the same SHA-256 as the preserved previous output (`07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b`): 218,148 rows, unchanged schema, zero timestamps added/removed/relabelled, zero availability changes, and zero differences across 1,626,090 populated sensor readings and 218,148 all-device averages. Maximum temperature difference is 0 degrees C.
+  - Verified unique ordered minute-aligned epochs and timestamp consistency, finite observed sensor readings, availability/count/coverage/confidence invariants, average consistency, and the full 19,984-row Phase 3A input contract. Both statistics series and the authoritative Phase 3A P90 (22.428666649999997) are unchanged; downstream Phase 2/3 production outputs were not regenerated.
+  - All 24 focused source-discovery/QC/Phase 1 statistics tests and 47 downstream Phase 2/3 regression tests passed (71 total). Updated Python files passed syntax checks; no new Pylance errors were found (the existing unused staleness-policy parameter hint remains untouched).
+
+### Added aggregate-exclusion duplicate QC and exact source reconciliation
+- Summary:
+  - Added opt-in `--exclude-temperature-raw` mode to the standalone QC script, preserving its original all-files behavior and reports.
+  - Recomputes all duplicate statistics after excluding the aggregate; reports strict spread exceedances at 1e-9, 1e-6, 0.001, 0.01, 0.05, and 0.1 degrees C plus non-overlapping bins.
+  - Reads the existing configured gate and reports strict-below status separately from Phase 1's rounded-rate, inclusive gate rule.
+  - Compares aggregate and timestamped-source full-record multisets with exact parsed values and multiplicities, exports all unmatched record groups in both directions, and reports invalid/non-finite observations explicitly.
+- Affected files:
+  - scripts/qc_phase1_duplicate_keys.py
+  - scripts/test_qc_phase1_duplicate_keys.py
+  - scripts/README.md
+  - artifacts/README.md
+  - artifacts/phase1_duplicate_qc/excluding_temperature_raw/qc_phase1_duplicate_summary.json (generated)
+  - artifacts/phase1_duplicate_qc/excluding_temperature_raw/qc_phase1_duplicate_conflicts.csv (generated)
+  - artifacts/phase1_duplicate_qc/excluding_temperature_raw/qc_phase1_unmatched_records.csv (generated)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Separates aggregate/source overlap from original-source duplicates without changing Phase 1, its inputs, its configuration, or pipeline outputs.
+  - Exact value matching is intentionally not replaced by tolerance matching; equal row totals or key coverage do not establish multiset equivalence.
+  - Exclusion-mode outputs are isolated beneath the already-ignored QC artifacts subfolder; the exhaustive unmatched CSV may be large.
+- Validation and results:
+  - All 20 standalone QC and existing Phase 1 statistics tests passed, including strict threshold boundaries, inclusive gate rounding, exact float precision, multiplicity mismatches, bidirectional exports, non-finite/invalid rows, CLI isolation, and original-mode regression coverage.
+  - Both updated Python files passed syntax and Pylance diagnostic checks.
+  - The full run excluded the aggregate and scanned 3,471 timestamped sources: 9,909,343 temperature rows, 9,899,253 unique keys, 10,090 excess duplicate rows, and 9,683 duplicated keys. Multiplicities are 2: 9,293 keys; 3: 373; 4: 17.
+  - The duplicate-row rate is 0.10182309765642385% (Phase 1 rounded rate 0.101823%), strictly below 0.5% and passing the existing inclusive QC gate.
+  - Identical-value duplicate keys: 4,963 (51.254776%); conflicting keys: 4,720 (48.745224%). Maximum spread is 0.44000244140625 degrees C; mean is 0.011461862515594966 degrees C.
+  - Strict conflicting-spread exceedances are >1e-9: 4,720; >1e-6: 4,719; >0.001: 4,719; >0.01: 4,187; >0.05: 3; >0.1: 2.
+  - Exact full-record multisets are not equal: 9,118,190 occurrences matched; 791,153 aggregate occurrences and 791,153 timestamped-source occurrences are unmatched. Each direction contains 790,814 unmatched record groups, exported exhaustively in a 204,090,611-byte CSV. Neither population contains invalid or non-finite temperature records.
+  - All 1,581,628 unmatched CSV groups reconcile with the summary. Across 790,797 affected keys, per-key occurrence totals agree in both directions; exact values still do not all match.
+  - Verified every report count/multiplicity/spread/gate invariant, all 100 conflicting examples, and 264 original raw records covering example provenance and systematic unmatched samples.
+  - SHA-256 checks confirmed Phase 1, its configuration, existing pipeline artifacts, and the previous all-files QC reports are byte-for-byte unchanged.
+
+### Added standalone raw Phase 1 duplicate-key investigation
+- Summary:
+  - Added a stdlib-only, bounded-memory SQLite audit of raw temperature keys with Phase 1-compatible parsing, validation, and first-occurrence ordering.
+  - Reports counts, multiplicities, exact value agreement/conflicts, conflicting value spreads, source-file provenance, and cross-file versus within-file attribution.
+  - Generates a compact conflicting-example CSV and JSON summary under `artifacts/phase1_duplicate_qc/`; added focused tests and usage documentation.
+- Affected files:
+  - scripts/qc_phase1_duplicate_keys.py
+  - scripts/test_qc_phase1_duplicate_keys.py
+  - scripts/README.md
+  - artifacts/README.md
+  - artifacts/phase1_duplicate_qc/qc_phase1_duplicate_conflicts.csv (generated)
+  - artifacts/phase1_duplicate_qc/qc_phase1_duplicate_summary.json (generated)
+  - .gitignore
+  - CHANGELOG.md
+- Rationale and impact:
+  - Investigates whether source-file overlap explains Phase 1 duplicates without changing `build_phase1_temperature.py`, its deduplication behavior, or existing pipeline outputs.
+  - Undefined percentages/spreads are explicit nulls; non-finite values are audited rather than silently discarded.
+  - The new generated-output subfolder is ignored, consistent with the source-only repository policy.
+- Validation:
+  - All 12 focused QC/CLI and existing Phase 1 statistics tests passed; both new Python files passed syntax and editor diagnostic checks.
+  - Scanned all 3,472 sources and 89,184,087 raw rows. The 19,818,686 temperature rows, 9,899,253 unique keys, and 9,919,433 excess duplicate rows reconcile exactly with the existing Phase 1 QC artifact.
+  - Found 9,104,324 identical-value duplicate keys (91.969808%) and 794,929 conflicting keys (8.030192%). Maximum conflicting-key spread is 0.44000244140625; mean is approximately 0.0000680563812320563. Of the conflicting keys, 790,209 have spreads at most 1e-9.
+  - All duplicate keys span files; 99.796601% of excess rows are attributable to cross-file repetition. The aggregate `temperature_raw.csv` participates in every duplicated key.
+  - Validated report reconciliation and example ordering. Re-exported all 100 examples from their 430 original observations through the corrected production analyzer after detecting SQLite JSON float rounding; verified exact float provenance and unchanged non-provenance fields.
+  - SHA-256 checks confirmed the Phase 1 script, configuration, and existing pipeline CSV/decision artifacts are byte-for-byte unchanged.
+
+## 2026-11-02
+
+### Simplified Phase 3 execution for the approved Phase 3A cohort
+- Summary:
+  - Replaced the Phase 3 production execution path with a fixed A/C/D/E/F/G cohort over the inclusive 19,984-bucket interval from 2022-02-24 18:50 UTC through 2022-03-10 15:53 UTC.
+  - Added strict Phase 3A validation for the exact row count, inclusive endpoints, consecutive 60-second timestamps and epochs, and finite readings for all cohort sensors. Invalid inputs now fail rather than invoke availability or re-entry behavior.
+  - Preserved the existing Phase 2 all-devices observed P90 threshold, synchronization timing, signed persistent history, normalization, all-zero fallback, and source-aligned clustering math.
+  - Set normal Phase 3A production execution to baseline alpha 0.10, producing one compact selected-result row per clustering event. Retained the full 19-value alpha sweep as an explicit tuning option.
+  - Removed the legacy availability-aware `SensorHistoryTracker` and its departure, re-entry, missing-observation, and zero-observation tests from the Phase 3A implementation path. The stable-cohort history recurrence and source-aligned clustering math remain unchanged.
+  - Removed the generated sensor-by-minute history trace; internal greedy-search calculations remain available to focused tests.
+  - Added deterministic coordinator labels using the lexicographically greatest member, and documented the convention.
+  - Added focused Phase 3A tests for the one-alpha production output, opt-in sweep, fixed-cohort history behavior, and timestamp/value validation; updated the script README.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_history.py
+  - scripts/README.md
+  - artifacts/phase3_sensor_history_events.csv (regenerated)
+  - artifacts/phase3_sensor_history_trace.csv (removed from normal production output)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Matches the approved stable-cohort Phase 3A assumptions, avoids runtime availability branches and multi-gigabyte audit exports, and keeps the selected mathematical results reproducible from the aligned input, configuration, and tests. The event CSV schema and contents are intentionally compacted; the legacy per-sensor-per-minute trace is no longer produced.
+- Validation:
+  - All notebook code cells completed successfully against the 218,148-row Phase 1 input; Phase 3A validated the 19,984-bucket interval and used the existing P90 threshold of 24.343381.
+  - `python -B -m unittest scripts.test_phase3_history scripts.test_phase2_monitoring -q` passed all 44 Phase 3A and Phase 2 regression tests.
+  - Verified the production artifact contains exactly 33 rows, one alpha=0.10 result per clustering event, with complete A/C/D/E/F/G history and partition coverage, coordinator assignments, and no sensor-by-minute history trace. The CSV is 20,212 bytes; tests also verify the explicit full-sweep option retains all 19 alpha values.
+  - Notebook emitted one non-blocking pandas warning that rounding has no effect on datetime columns; execution completed successfully.
+
+### Established the Phase 3A stable input contract for US-3.17
+- Summary:
+  - Added `config/phase3a_experiment_config.json` as the authoritative source for the aligned input, fixed cohort, inclusive interval, expected bucket count, sampling interval, baseline alpha, boundary convention, and planned threshold series. The cohort-specific P90 remains null/pending; the historical all-devices P90 is identified as temporary development-only.
+  - Wired the notebook to load the input/statistics paths and temporary threshold source from the config, preserve original input order, and validate config plus stable-cohort data before monitoring or clustering.
+  - Added explicit rejection for cohort drift, missing columns/readings, non-finite values, incorrect row count/endpoints, duplicate or out-of-order timestamps, timestamp gaps, and epoch/timestamp mismatch. Added a concise validation summary before invoking the in-memory Phase 2 monitor for synchronization timing; no separate Phase 2 comparison run is produced.
+  - Expanded tests for the config contract and required valid/invalid input cases; documented the config and validation behavior in the script README.
+- Affected files:
+  - config/phase3a_experiment_config.json
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_history.py
+  - scripts/README.md
+  - artifacts/phase3_sensor_history_events.csv (regenerated)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes the approved Phase 3A population explicit and prevents silent repair or cohort drift before synchronization and clustering. The existing in-memory Phase 2 synchronization timing remains in use as approved; the authoritative Phase 3A threshold is deferred to the next story.
+- Validation:
+  - Notebook Stage 1 and Stage 5 executed successfully; validation reported 19,984 rows, the approved endpoints and cohort, zero missing readings, and zero timestamp gaps.
+  - `python -B -m unittest scripts.test_phase3_history scripts.test_phase2_monitoring -q` passed all 45 tests.
+  - Verified 33 output rows, one per clustering event at alpha 0.10, with temporary threshold metadata and no history trace. Changed-file whitespace checks passed apart from a harmless notebook line-ending notice.
+
+## 2026-11-03
+
+### Calculated the Phase 3A P90 and generated the matched Phase 2 baseline
+- Summary:
+  - Extended the existing Phase 1 production workflow to calculate the mean of exactly A/C/D/E/F/G for every validated Phase 3A bucket and append the `phase3a_stable_cohort` statistics row using the existing linear-interpolation percentile convention. P90 is stored at full precision; the historical all-device statistics row is preserved.
+  - Updated `phase3a_experiment_config.json` with the authoritative P90 `22.428666649999997`, statistic, status, and Phase 1 script/artifact provenance. The Phase 3 notebook now reads the Phase 3A row with round-trip float parsing and rejects any config/statistics mismatch.
+  - Reused the existing Phase 2 monitor on the exact Phase 3A input and threshold. Added the compact `phase3a_phase2_baseline.json` with communication categories, resynchronizations, membership checks, evaluated bucket count, and centralized transmission reference.
+  - Updated Phase 3 event output to record the authoritative threshold, refreshed US-3.18 documentation, and added round-trip precision and matched-baseline checks.
+- Affected files:
+  - scripts/build_phase1_temperature.py
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase1_phase3a_statistics.py
+  - scripts/test_phase3_history.py
+  - scripts/README.md
+  - artifacts/README.md
+  - config/phase3a_experiment_config.json
+  - artifacts/phase1_average_statistics.csv
+  - artifacts/phase3_sensor_history_events.csv (regenerated)
+  - artifacts/phase3a_phase2_baseline.json (generated)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Establishes one authoritative Phase 3A threshold and a matched Phase 2 result for later FMIC/SMIC comparisons, without changing Phase 2 monitoring logic or writing a duplicate large row trace.
+- Validation:
+  - Phase 1 generated exactly 19,984 Phase 3A averages; P90 is `22.428666649999997`, consistent with the planning estimate. The existing all-device row remains `24.343381`.
+  - Phase 3 notebook completed successfully: 19,984 buckets, zero missing readings/gaps, 2,107 compact event rows, and a matched baseline with 2,107 resynchronizations, zero membership changes, six observed sensors on every row, and 38,087 total messages. Category totals reconcile; centralized reference is 119,904 transmissions.
+  - `python -B -m unittest scripts.test_phase1_phase3a_statistics scripts.test_phase3_history scripts.test_phase2_monitoring -q` passed all 51 tests.
+  - The Phase 1 command with `--enforce-gates` returned nonzero because the pre-existing duplicate-key QC rate is 50.050912% versus its 0.5% limit. The other Phase 1 gates passed, and the Phase 3A statistics/config outputs were generated. No Phase 1 gate logic was changed for this story.
+
+## 2026-11-01
+
+### Consolidated the Phase 3 review sample to a single file
+- Summary:
+  - At user request, removed `phase3_alpha_summary_sampled_events.csv`, `phase3_trace_sample.csv`, and `README.md` from `artifacts/phase3_review_sample/`.
+  - The review sample is now the single file `artifacts/phase3_review_sample/phase3_events_sample.csv` (62 MB): 353 full-fidelity event rows (first 20, every 100th, last 20 of the 31,364 synchronization events) with the complete `alpha_clustering_evaluations` JSON preserved.
+- Affected files:
+  - artifacts/phase3_review_sample/phase3_alpha_summary_sampled_events.csv (deleted)
+  - artifacts/phase3_review_sample/phase3_trace_sample.csv (deleted)
+  - artifacts/phase3_review_sample/README.md (deleted)
+  - CHANGELOG.md
+- Rationale and impact:
+  - The user asked for one review file; the extra extracts were unnecessary. The full Phase 3 outputs remain untouched, so the removed extracts can be regenerated if needed.
+- Validation:
+  - Confirmed the folder now contains only `phase3_events_sample.csv` at 62 MB.
+
+## 2026-11-01
+
+### Created a sub-100MB Phase 3 review sample
+- Summary:
+  - Added `artifacts/phase3_review_sample/` (about 78 MB total) extracted from the full Phase 3 outputs for human review.
+  - `phase3_events_sample.csv` (65 MB): 353 full-fidelity event rows, stratified as the first 20 events, every 100th event, and the last 20 events, with the complete `alpha_clustering_evaluations` JSON preserved.
+  - `phase3_alpha_summary_sampled_events.csv` (0.9 MB): 6,707 flattened rows (353 events x 19 alphas) with cluster count, partition quality, selected candidate index, fallback flags, and compact selected partitions.
+  - `phase3_trace_sample.csv` (12 MB): 83,288 per-sensor audit rows covering the complete first week plus every sampled event's bucket.
+  - Added a README in the sample folder documenting selection criteria and column provenance.
+- Affected files:
+  - artifacts/phase3_review_sample/phase3_events_sample.csv (new, generated)
+  - artifacts/phase3_review_sample/phase3_alpha_summary_sampled_events.csv (new, generated)
+  - artifacts/phase3_review_sample/phase3_trace_sample.csv (new, generated)
+  - artifacts/phase3_review_sample/README.md (new)
+  - CHANGELOG.md
+- Rationale and impact:
+  - The full events file (5.59 GB) is impractical to open for review; the sample keeps exact original row content (no rounding or recomputation) while staying under the requested 100 MB. No pipeline code, notebooks, or configuration were modified, and the full outputs are untouched.
+- Validation:
+  - Verified the summary covers 353 events x 19 alphas with synchronization IDs spanning 1 to 31364, the trace sample contains 8 sensors across 10,411 buckets, and all three CSVs parse cleanly with pandas.
+
+## 2026-11-01
+
+### Executed the Phase 3 clustering notebook end-to-end on the full dataset
+- Summary:
+  - Ran all eight code cells of `scripts/build_phase3_temperature_clustering.ipynb` against the full 218,148-row Phase 1/2 dataset using the repository virtual environment.
+  - Generated the first full-data Phase 3 outputs: `artifacts/phase3_sensor_history_events.csv` (31,364 synchronization-event snapshots with per-event normalization and 19-alpha clustering evaluations) and `artifacts/phase3_sensor_history_trace.csv` (1,745,184 per-sensor history-audit rows).
+  - The run also deterministically regenerated the Phase 2 outputs (`phase2_temperature_sensors.csv`, `phase2_temperature_metrics.json`, `phase2_data_dictionary.csv`, `phase2_sensor_reduction_analysis.csv`) through the notebook's integrated Phase 2 validation stages; no tracked files changed.
+- Affected files:
+  - artifacts/phase3_sensor_history_events.csv (new, generated)
+  - artifacts/phase3_sensor_history_trace.csv (new, generated)
+  - artifacts/phase2_temperature_sensors.csv (regenerated, unchanged behavior)
+  - artifacts/phase2_temperature_metrics.json (regenerated, unchanged behavior)
+  - artifacts/phase2_data_dictionary.csv (regenerated, unchanged behavior)
+  - artifacts/phase2_sensor_reduction_analysis.csv (regenerated, unchanged behavior)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Makes the US-3.2 through US-3.4 implementation reviewable on real data: spot checks confirmed the initialization event records the zero-history singleton fallback, and later events record non-trivial partitions (e.g., at synchronization 1000, alpha 0.05 selects {A,H}, {B,D,G}, {C,E}, {F}, with finer partitions at higher alpha). No notebook, script, or configuration code was modified.
+- Validation:
+  - `python -B -m unittest scripts.test_phase3_history scripts.test_phase2_monitoring -q` passed all 60 tests (test saves are mocked and do not touch the generated artifacts).
+  - Notebook run completed with exit code 0 and passed its integrated Phase 2 validation gate; output CSV headers and sample rows verified.
+
 ## 2026-10-29
 
 ### Implemented US-3.4 partition quality and greedy merging
