@@ -418,17 +418,17 @@ Run the Phase 3 regression suite with:
 
 `python -m unittest scripts.test_phase3_history -v`
 
-### End-to-end FMIC (US-3.19)
+### End-to-end FMIC and SMIC (US-3.19 / US-3.20)
 
 Run all cells in `scripts/build_phase3_temperature_clustering.ipynb`.
 All Phase 3 history/normalization/clustering/input definitions and the independent
-FMIC allocation/monitoring engine live in clearly labeled cells in this one
+FMIC/SMIC allocation and shared monitoring engine live in clearly labeled cells in this one
 notebook. The `phase3-history-implementation` and
 `phase3-fmic-implementation` tags let separate automated tests execute those
 definitions without running the production experiment. The former external
 Phase 3 implementation modules have been removed; no duplicated core is kept.
 The existing Phase 2 dependency remains for legacy helper regression coverage.
-Normal execution uses only alpha 0.10. No SMIC, alpha tuning, availability
+Normal execution runs both methods independently using only alpha 0.10. No alpha tuning, availability
 handling, full sensor-minute trace, or exhaustive merge-search export is added.
 
 The authoritative chapter is
@@ -520,6 +520,77 @@ Phase 2 baseline. All 19,984 buckets pass centralized-state validation,
 including 1,999 violated buckets, with zero false-safe/false-violated rows.
 This is a result for the fixed experiment and alpha, not a general superiority
 claim or an alpha-tuning result.
+
+#### SMIC source interpretation and implementation
+
+The **rendered original PDF** was checked, including
+[Appendix 1, printed p.22/PDF p.26](../Writing/Motivation/140516editor%20Book%20Chapter%20%28Last%20Version%29.pdf#page=26)
+and [its recurrence on printed p.24/PDF p.28](../Writing/Motivation/140516editor%20Book%20Chapter%20%28Last%20Version%29.pdf#page=28).
+The chapter's `sigma^2` is the **unnormalized sum of squared deviations** of the
+discounted observation vectors, not conventional population or sample variance.
+Appendix 1 explicitly indexes `i=1..m`, resolving section 1.4's inconsistent
+`i=0..m` notation. There is **no division by m or m-1**:
+
+```
+sigma_squared = sum((discounted_observation_i - mu)**2, i=1..m)
+# k is the previous count; mu_old precedes the unchanged first-moment update.
+sigma_squared_new = 0.25 * sigma_squared_old + k/(k+1) * (reading - 0.5*mu_old)**2
+W_n = abs(mu_n) + sqrt(((m-1)/m) * sigma_squared_n)
+```
+
+`DiscountedSecondMoment` extends the existing first-moment implementation,
+using the same raw observations, count, discount, and synchronization persistence.
+The stable central-sum recurrence has only nonnegative terms; it does not
+subtract accumulated squared sums or clamp negative values. Nonfinite/negative
+states fail explicitly. No floating-point correction is required by this update.
+At initialization (`m=0`), zero moments and equal weights remain a labeled
+**project convention**; at `m=1` the central sum and second-moment contribution
+are zero. The existing all-zero-total fallback and individual-zero rule apply.
+
+The hand example A=`[2,4,6]` yields discounted central sums `0`, `9/2`, `97/6`,
+and SMIC weights `2`, `4`, `17/6 + sqrt(97/9)`. Tests list the discounted
+vectors, individual squared deviations, sums, conservative terms, and weights.
+They also compare a longer independent explicit-vector calculation with the
+constant-size running state.
+
+`FMICMonitor` keeps its existing name/API for compatibility but now accepts
+`weight_method="FMIC"` (default) or `"SMIC"`. It remains **one** node/coordinator/root
+lifecycle; only the moment/weight strategy differs. The optional
+`allocation_strategy(moment, partition, root_allowance)` hook permits controlled
+same-allocation protocol equivalence tests. No separate SMIC protocol is kept.
+Sensor moments or weights fit in existing root-sync responses; allocated
+allowances fit in existing bundled updates, so no extra exchanges are charged.
+This project counts transmissions, not scalar payload fields or bytes.
+
+Execute all notebook cells to generate both outputs, or load its definition cells
+and call `run_phase3a_fmic(REPO_ROOT)` / `run_phase3a_smic(REPO_ROOT)` separately.
+Both use the authoritative config, input validation, p90 verification, matched
+Phase 2 baseline, and their **own** event-driven schedules.
+
+Additional compact outputs:
+- `artifacts/phase3a_smic_events.csv`: one row per SMIC root synchronization,
+  retaining the FMIC fields and adding second moments and conservative terms.
+- `artifacts/phase3a_smic_summary.json`: the matched identity/accounting/correctness
+  fields plus second-moment provenance/numerics, payload policy, and a clearly
+  labeled preliminary Phase 2 comparison.
+
+The validated SMIC alpha-0.10 run processes all **19,984** buckets, including
+**1,999** centralized violated buckets, with **zero false-safe and false-violated**
+counts. It uses **11,902 transmissions**, **293 synchronizations** (including
+initialization), **3,514 coordinator checks**, and **420 escalations**.
+This is **68.750492% fewer transmissions than matched Phase 2**, and **20 fewer
+than FMIC** for this one experiment, not a final algorithm ranking.
+Despite equal synchronization counts, each method has two synchronization
+timestamps absent from the other method's schedule.
+Full notebook execution preserves the existing FMIC events and summary
+byte-for-byte, as well as the Phase 2 baseline, Phase 1 inputs/statistics/script,
+and experiment config. No Phase 1/2 transformation, alpha sweep, or availability
+handling changes are part of SMIC.
+Validation passed 87 FMIC/SMIC/history/Phase 2 tests. A separate raw-input replay
+confirmed all SMIC synchronization decisions, message categories, root-known
+states, moment/weight/allowance snapshots, and counts; its independent
+discounted-square-sum calculation differed from the stable central sum by at
+most `2.274e-13`.
 
 Tests:
 `python -B -m unittest scripts.test_phase3_monitoring scripts.test_phase3_history scripts.test_phase2_monitoring -q`

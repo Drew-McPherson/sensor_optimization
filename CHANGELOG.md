@@ -6,6 +6,32 @@ This file tracks implemented changes in this repository.
 
 ## 2026-11-03
 
+### Implemented and validated SMIC through the shared Phase 3A notebook engine
+- Summary:
+  - Added persistent discounted central second-moment state using the original PDF Appendix 1 stable recurrence, preserving the existing first-moment update.
+  - Documented that the source uses an unnormalized squared-deviation sum, with no m or m-1 divisor; Appendix 1 resolves section 1.4's i=0 indexing discrepancy to i=1..m.
+  - Added SMIC first-plus-second-moment weights and shared normalized node/coordinator allocation, explicit early-observation and project zero-weight handling.
+  - Generalized the existing monitoring lifecycle and production runner to select FMIC or SMIC without duplicating triggering, clustering, escalation, communication accounting, or two-sided correctness checks.
+  - Normal notebook execution now runs both methods independently at configured alpha 0.10, producing separate compact SMIC events/summary without overwriting FMIC or Phase 2 artifacts.
+  - Added hand-derived second-moment/weight checks, explicit-vector and numerical-state checks, inherited SMIC protocol/failure tests, same-allocation equivalence, a pre-refactor FMIC fingerprint, and dual-run output-preservation/provenance tests.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_monitoring.py
+  - scripts/README.md
+  - CHANGELOG.md
+  - artifacts/phase3a_smic_events.csv (generated)
+  - artifacts/phase3a_smic_summary.json (generated)
+- Rationale and impact:
+  - Implements US-3.20 with one shared monitoring architecture and the source-defined SMIC weighting, not a conventional variance estimator or a separate synchronization schedule.
+  - Moment/weight payloads accompany existing root-sync responses and updates under the established transmission-counting policy; no additional exchanges are required.
+  - Full SMIC run: 19,984 buckets, 1,999 centralized violated buckets, zero false-safe/false-violated, 11,902 messages, 293 synchronizations, 3,514 coordinator checks, 420 escalations.
+  - Preliminary savings: 68.750492% versus the 38,087-message matched Phase 2 baseline; 20 fewer messages than unchanged FMIC. No tuning or final comparative claim.
+- Validation:
+  - All notebook cells executed successfully for both methods; protected FMIC outputs, Phase 2 baseline, aligned Phase 1 input/statistics/script, and config remained byte-for-byte unchanged.
+  - All 87 focused FMIC/SMIC/history/Phase 2 tests passed, including the pre-refactor FMIC protocol fingerprint.
+  - Independent raw-input replay verified all SMIC synchronization decisions, centralized states, communication categories/totals, and event moment/weight/allowance snapshots; the maximum central-sum discrepancy was 2.274e-13.
+  - Each method had two synchronization timestamps absent from the other's schedule, despite equal synchronization counts.
+
 ### Documented and hand-validated the source first-moment recurrence
 - Summary:
   - Added a direct chapter PDF reference (section 1.4, printed p.10/PDF p.14), explicit discounted vector set, algebraic sum recurrence, and observation-count divisor beside the notebook implementation.
