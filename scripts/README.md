@@ -405,9 +405,10 @@ selected result.
 The preserved `artifacts/phase3_sensor_history_events.csv` contains one row per clustering
 event at the baseline `alpha=0.10`, including event/time/cause, raw and
 normalized histories, fallback status, selected partition and quality, cluster
-count, coordinator assignments, and authoritative threshold provenance. To run the full 19-value alpha
-sweep for tuning, pass `alpha_values=PHASE3_ALPHA_VALUES` to
-the legacy `build_phase3a_history_events` helper (not FMIC's runtime schedule).
+count, coordinator assignments, and authoritative threshold provenance. The
+legacy `build_phase3a_history_events` helper also accepts `alpha_values` for
+clustering-only regression coverage; it is not the production FMIC/SMIC alpha
+sweep.
 Coordinator reporting chooses the
 lexicographically greatest cohort label in each cluster as a deterministic
 descriptive convention. Normal runs do not generate
@@ -428,8 +429,30 @@ notebook. The `phase3-history-implementation` and
 definitions without running the production experiment. The former external
 Phase 3 implementation modules have been removed; no duplicated core is kept.
 The existing Phase 2 dependency remains for legacy helper regression coverage.
-Normal execution runs both methods independently using only alpha 0.10. No alpha tuning, availability
-handling, full sensor-minute trace, or exhaustive merge-search export is added.
+Normal execution first runs the US-3.21 prerequisite gate and then executes
+the complete US-3.22 production sweep: 19 fresh full-length runs per method at alpha 0.05 through
+0.95 in increments of 0.05. Each run uses the locked six-sensor cohort,
+19,984 buckets, and authoritative full-precision P90. The sweep writes
+`artifacts/phase3a_alpha_results.csv`,
+`artifacts/phase3a_alpha_events.csv`, and
+`artifacts/phase3a_comparison_summary.json`, plus three PNG comparisons for
+messages, root synchronizations, and mean cluster count versus alpha.
+
+The consolidated event file retains compact synchronization-level partitions
+and monitor state. Cluster metrics include initialization consistently; mean
+cluster size is total sensor memberships across all selected partitions
+divided by total clusters across those events. Mean cluster count is the
+arithmetic mean of the per-event counts. Alpha 0.10 is checked against the
+existing FMIC/SMIC message categories, synchronization counts, correctness,
+and event fingerprints; the existing fixed-alpha event and summary files are
+never overwritten. The shared runner still defaults to alpha 0.10 for an
+explicit original fixed-alpha run. Only correctness-passing results are eligible
+for descriptive minimum-message alpha reporting. The single-dataset sweep is
+not a statistical or out-of-sample tuning evaluation.
+
+Plot generation requires `matplotlib` (included in `requirements.txt`). No
+availability handling, full sensor-minute trace, or exhaustive merge-search
+export is added.
 
 The authoritative chapter is
 [Clustering for Monitoring Distributed Data Streams](../Writing/Motivation/140516editor%20Book%20Chapter%20%28Last%20Version%29.pdf#page=14).

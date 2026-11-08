@@ -6,6 +6,53 @@ This file tracks implemented changes in this repository.
 
 ## 2026-11-03
 
+### Completed US-3.22 alpha sensitivity and matched comparison
+- Summary:
+  - Parameterized the shared production runner with explicit alpha while retaining 0.10 as its default, and ran 19 fresh full-length FMIC and 19 fresh full-length SMIC simulations on the approved Phase 3A experiment.
+  - Added 38-row results with per-run cohort, interval, threshold, correctness, message categories, cluster metrics, and provenance; consolidated synchronization events; a compact comparison summary; and three result-derived plots.
+  - Documented initialization-inclusive cluster aggregation, updated Phase 3 usage and status plans, and added matplotlib as the plotting dependency.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_monitoring.py
+  - scripts/README.md
+  - requirements.txt
+  - Phase3A_Pivot_Plan.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - artifacts/phase3a_alpha_results.csv
+  - artifacts/phase3a_alpha_events.csv
+  - artifacts/phase3a_comparison_summary.json
+  - artifacts/phase3a_messages_vs_alpha.png
+  - artifacts/phase3a_synchronizations_vs_alpha.png
+  - artifacts/phase3a_clustering_vs_alpha.png
+  - CHANGELOG.md
+- Rationale and impact:
+  - Completes the approved full-simulation alpha comparison without changing source-defined formulas or selecting configurations that fail correctness. All 38 runs use the locked cohort, interval, and full-precision P90; all have zero false-safe/false-violated states and reconciled messages. The 0.10 sweep reproduces the saved event fingerprints and baseline totals.
+  - The final notebook path runs the sweep without invoking fixed-alpha output writers. During the first full-notebook validation, the then-present trailing SMIC call rewrote `artifacts/phase3a_smic_summary.json`; this call was removed before the final sweep. The current SMIC summary preserves the validated message/category metrics and event fingerprint, but its SHA-256 differs from its pre-task value; the final sweep preserved the current fixed-alpha artifacts by hash.
+  - The minimum observed message total for both methods is at alpha 0.65 on this dataset and grid only (FMIC 8,722; SMIC 8,720); both sensitivity curves are irregular. This is not a universal or out-of-sample alpha recommendation.
+- Validation:
+  - `python -B -m unittest scripts.test_phase3_monitoring scripts.test_phase3_history scripts.test_phase2_monitoring -q` — 94 tests passed.
+  - Executed the full production notebook; verified 38 unique runs, the approved 19,984-bucket inputs and threshold, zero correctness failures, category reconciliation, initialization-inclusive cluster metrics, all three plots, and unchanged final-sweep protected hashes.
+
+### Completed US-3.21 synthetic validation gate
+- Summary:
+  - Added an explicit sender/recipient/purpose/category transmission ledger and a singleton-cluster protocol case for both FMIC and SMIC.
+  - Strengthened the false-safe negative control to assert that the summary reports failure, and checked root-known state against independent truth at every FMIC synthetic observation.
+  - Added a compact validation report with source references, commands, synthetic coverage, production replay results, and remaining limitations.
+  - Updated the Pivot Plan and Project Plan implementation status to record US-3.21 as complete and US-3.22 as pending.
+- Affected files:
+  - scripts/test_phase3_monitoring.py
+  - artifacts/phase3a_validation_summary.json
+  - Phase3A_Pivot_Plan.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Closes US-3.21 validation gaps without changing either monitoring algorithm or production output schema.
+  - The approved experiment remains the 19,984-bucket stable cohort; isolated full-data FMIC and SMIC replays matched their saved event and summary artifacts byte-for-byte, so existing production outputs were unchanged.
+- Validation:
+  - `python -B -m unittest scripts.test_phase3_monitoring scripts.test_phase3_history scripts.test_phase2_monitoring -q` — 91 tests passed.
+  - The rendered source PDF was checked at printed p.10/PDF p.14 for the moment/weight definitions and Appendix 1, printed p.22/PDF p.26, for the central second-moment indexing and divisor.
+  - Both isolated production replays processed 19,984 buckets, agreed on 1,999 violated buckets, passed both mismatch counts, and reconciled messages: FMIC 11,922 messages / 293 synchronizations; SMIC 11,902 / 293.
+
 ### Implemented and validated SMIC through the shared Phase 3A notebook engine
 - Summary:
   - Added persistent discounted central second-moment state using the original PDF Appendix 1 stable recurrence, preserving the existing first-moment update.
