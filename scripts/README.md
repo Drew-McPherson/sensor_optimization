@@ -742,12 +742,12 @@ same-allocation protocol equivalence tests. No separate SMIC protocol is kept.
 Sensor moments or weights fit in existing root-sync responses; allocated
 allowances fit in existing bundled updates, so no extra exchanges are charged.
 This project counts transmissions, not scalar payload fields or bytes.
-The global mean uses Python's built-in `sum` over sensor IDs in sorted order,
-matching Phase 2's arithmetic and ordering for protocol comparisons. Its
-floating-point result can differ from `math.fsum` depending on Python version
-and values; exact and near-boundary tests remain important because a rounding
-difference can change a trigger or threshold decision. `capture_decisions=True`
-optionally retains a compact in-memory,
+The global mean uses `math.fsum` to preserve the established FMIC/SMIC
+arithmetic. The US-3.24 checker allows an absolute difference up to `1e-12`
+for continuous snapshots only; synchronization flags, trigger sets,
+threshold-state classifications, message counts, and synchronization timelines
+remain exact, so a numerical tolerance cannot hide a decision change.
+`capture_decisions=True` optionally retains a compact in-memory,
 per-bucket trace of entry references/allowances/state, triggering sensor IDs,
 synchronization decisions, post-sync state, and message counts. It is disabled
 by default and does not write or alter production artifacts.
@@ -784,3 +784,102 @@ most `2.274e-13`.
 
 Tests:
 `python -B -m unittest scripts.test_phase3_monitoring scripts.test_phase3_history scripts.test_phase2_monitoring -q`
+
+### US-3.24 Phase 2 / Phase 3 protocol equivalence
+
+Run the fixed-singleton comparison from the repository root:
+
+```powershell
+python -B -m scripts.phase3a_protocol_equivalence
+```
+
+The command requires the passing US-3.23 revised Phase 2 baseline, validates
+its input/event hashes and current `scripts/phase2_monitoring.py` hash, then
+independently runs the unrounded Phase 2 trace and the existing Phase 3
+`FMICMonitor` over the locked 19,984-bucket A/C/D/E/F/G cohort. Phase 3 uses
+the `fixed_singletons_equal_allowances` callback mode; the callback fixes and
+checks the partition at every synchronization and ignores moment/history
+values for partitions, allowances, triggers, and costs. Its internal numeric
+alpha is ignored and is reported as not applicable. The root allowance is
+`abs(threshold - synchronized_mean)` and is assigned equally to all sensors.
+
+The run writes only:
+
+- `artifacts/phase3a_protocol_equivalence_summary.json`: pass/fail checks,
+  the first actionable mismatch and diagnostics, expected/actual trace lengths,
+  mapped message totals, independent root-state oracle results, full
+  input/config/code/baseline/test hashes, and protected-artifact before/after
+  hashes.
+- `artifacts/phase3a_protocol_equivalence_events.csv`: one compact row per
+  initialization, synchronization, or trigger, including trigger IDs, entry
+  and post-sync snapshots, root-known states, and mapped message counts.
+
+The production command runs the equivalence, Phase 2, Phase 3 history, and
+Phase 3 monitor suites. The equivalence tests include synthetic
+boundary/lifecycle/ledger/negative-control checks and two fresh-process
+production replays whose output bytes must match. A failed comparison writes
+a failed summary and exits nonzero; US-3.25 must remain blocked. The focused
+equivalence suite can be run separately with:
+
+```powershell
+python -B -m unittest scripts.test_phase3a_protocol_equivalence -q
+```
+
+Phase 2's trace has an opt-in `round_output=False` return mode for exact
+snapshot comparison; its existing rounded default and notebook output behavior
+are unchanged. Run the existing Phase 2/Phase 3 suites as well:
+
+```powershell
+python -B -m unittest scripts.test_phase2_monitoring scripts.test_phase3_history scripts.test_phase3_monitoring -q
+```
+
+The generated provenance includes every test module run by the production
+command, with the executed test count and suite result recorded after the
+regression run.
+
+### US-3.25 weighting, clustering, and alpha evaluation
+
+Run the US-3.25 workflow from the repository root:
+
+```powershell
+python -B -m unittest scripts.test_phase3a_us325 -q
+python -B -m scripts.phase3a_us325
+```
+
+The runner first verifies the US-3.23/3.24 prerequisite artifacts and runs the
+focused US-3.25, Phase 2, Phase 3 history/monitoring, and US-3.24 equivalence
+regression suites. It reuses the saved, passing US-3.24 C0 result, runs fresh
+FMIC-weighted and SMIC-weighted singleton controls, and starts the 19-alpha
+FMIC/SMIC grid only after those controls pass correctness and message-accounting
+gates. Each clustered configuration uses fresh monitor state.
+
+All new files use the `phase3a_us325_` prefix, leaving historical Phase 2,
+FMIC/SMIC, US-3.21, and US-3.22 outputs untouched:
+
+- `artifacts/phase3a_us325_control_results.csv`: exactly C0/C1/C2, with
+  alpha marked not applicable and per-control message composition.
+- `artifacts/phase3a_us325_alpha_results.csv`: the 38 fresh clustered runs,
+  including the revised Phase 2 comparison, synchronization/check outcomes,
+  repeated-check counts, and pathway message totals/shares.
+- `artifacts/phase3a_us325_control_cluster_size_summary.csv` and
+  `artifacts/phase3a_us325_cluster_size_summary.csv`: compact check outcomes
+  and within-cluster transmissions grouped by checked cluster size.
+- `artifacts/phase3a_us325_event_snapshots.csv`: compact control, alpha=0.10,
+  and exploratory minimum-alpha synchronization snapshots.
+- C0's retained per-event snapshots remain available in
+  `artifacts/phase3a_protocol_equivalence_events.csv`; the summary records this
+  reused source rather than copying the validated C0 event history.
+- `artifacts/phase3a_us325_comparison_summary.json`: control/alpha comparisons,
+  the prespecified and exploratory configuration table, provenance, focused
+  test count, replay outcomes, and interpretation limits.
+- Four plots: messages, root synchronizations, mean cluster count, and
+  communication composition versus alpha. Singleton controls are references,
+  not alpha-dependent runs.
+
+The summary distinguishes locally resolved checks from root synchronizations
+avoided and reports consecutive repeats only for adjacent buckets with
+unchanged membership and no intervening synchronization. It also documents
+the unchanged `abs(deviation) >= allowance` zero-allowance behavior. A fresh
+process replays FMIC and SMIC at alpha=0.10 and compares their event
+fingerprints; prerequisite and historical artifact hashes are checked before
+and after the workflow.

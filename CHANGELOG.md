@@ -6,6 +6,82 @@ This file tracks implemented changes in this repository.
 
 ## 2026-11-10
 
+### Implemented US-3.25 weighting and clustering evaluation
+- Summary:
+  - Added a gated runner that reuses the US-3.24 C0 result, runs FMIC/SMIC weighted singleton controls, then validates the complete 19-alpha clustered grid for both methods.
+  - Added actual-transmission pathway composition, controlled weighting/clustering contrasts, cluster-size check and repeat diagnostics, compact event snapshots, four saved-result plots, provenance, and fresh-process alpha=0.10 replays.
+  - Added synthetic tests for communication accounting, alpha-independent singleton behavior, repeated local checks and reset behavior, exact zero-allowance boundaries, and zero-weight sensors; documented the workflow and output files.
+- Affected files:
+  - scripts/phase3a_us325.py
+  - scripts/test_phase3a_us325.py
+  - scripts/README.md
+  - CHANGELOG.md
+  - artifacts/phase3a_us325_control_results.csv
+  - artifacts/phase3a_us325_control_cluster_size_summary.csv
+  - artifacts/phase3a_us325_alpha_results.csv
+  - artifacts/phase3a_us325_cluster_size_summary.csv
+  - artifacts/phase3a_us325_event_snapshots.csv
+  - artifacts/phase3a_us325_comparison_summary.json
+  - artifacts/phase3a_us325_messages_vs_alpha.png
+  - artifacts/phase3a_us325_synchronizations_vs_alpha.png
+  - artifacts/phase3a_us325_clustering_vs_alpha.png
+  - artifacts/phase3a_us325_communication_composition.png
+- Rationale and impact:
+  - Separates allowance-weighting effects from clustering effects without changing the validated Phase 2, FMIC/SMIC formulas, shared monitoring engine, or historical outputs. New experiment artifacts are isolated under the `phase3a_us325_` prefix.
+- Validation:
+  - `python -B -m unittest scripts.test_phase3a_us325 -q`: 9 focused tests passed.
+  - The runner's combined US-3.25, Phase 2, Phase 3 history/monitoring, and US-3.24 equivalence regression command passed all 131 tests before the experiment.
+  - `python -B -m scripts.phase3a_us325`: passed all three controls and all 38 clustered alpha runs. C0/C1/C2 totals were 9,159/8,964/8,962 messages and 467/457/457 root synchronizations; every configuration had zero false-safe and false-violated rows and reconciled messages.
+  - At the prespecified alpha 0.10, FMIC/SMIC reproduced the historical baseline totals and sync counts (11,922/11,902 messages; 293/293 synchronizations). The exploratory in-sample tested-grid minima were 8,722 at alpha 0.65 for FMIC and 8,720 at alpha 0.65 for SMIC.
+  - Both fresh-process alpha=0.10 replays passed; all 17 protected historical/prerequisite artifact hashes were unchanged. C0 retained its US-3.24 per-bucket equivalence result.
+
+### Hardened US-3.24 equivalence diagnostics and provenance
+- Summary:
+  - Made comparison results schema-consistent on trace-length mismatches and added actionable diagnostics for synchronization-event timelines, singleton partitions, node/coordinator allowances, and nonzero peer traffic.
+  - Added an absolute tolerance of `1e-12` for continuous comparison values while keeping protocol decisions, threshold states, synchronization flags, triggers, and message counts exact.
+  - Restored Phase 3's established `math.fsum` global-mean calculation and added complete test-module hashes plus executed test count/result to validation provenance.
+- Affected files:
+  - scripts/phase3a_protocol_equivalence.py
+  - scripts/test_phase3a_protocol_equivalence.py
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/README.md
+  - artifacts/phase3a_protocol_equivalence_summary.json (regenerated provenance and validation results)
+  - artifacts/phase3a_protocol_equivalence_events.csv (regenerated; byte-identical)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Improves failure diagnosis and reproducibility without altering Phase 2 arithmetic, FMIC/SMIC moment formulas, clustering behavior, or communication accounting. Continuous rounding-level differences are tolerated only when all discrete decisions remain identical.
+- Validation:
+  - `python -B -m unittest scripts.test_phase3a_protocol_equivalence -q`: 13 tests passed, including trace truncation through the production runner, negative controls for partition/node/coordinator allowances/event timeline/peer traffic, and a check that continuous-value tolerance does not mask a state change.
+  - `python -B -m unittest scripts.test_phase2_monitoring scripts.test_phase3_history scripts.test_phase3_monitoring -q`: 109 tests passed.
+  - `python -B -m scripts.phase3a_protocol_equivalence`: production equivalence passed and its bundled regression run passed all 122 tests.
+  - Production result: 19,984 buckets, 467 synchronizations, 753 trigger notifications, 9,159 messages for each implementation, zero Phase 3 peer transmissions, zero bucket mismatches, and zero false-safe/false-violated states. The accounting identity is `18 * 467 + 753 = 9,159`.
+  - Replaying the former ordered-sum arithmetic to a temporary output directory produced the same US-3.24 event CSV SHA-256 (`ff4a89ecec934a96456eeefa5e154b580b6ddac2251ef2711250380f2d489fcf`) as restored `math.fsum`. The summary was regenerated to include the new runner/test hashes and actual test count; its recorded historical/protected artifact checks passed.
+
+### Implemented US-3.24 Phase 2 / Phase 3 protocol equivalence gate
+- Summary:
+  - Added a reusable fixed-singleton/equal-allowance control around the current Phase 3 `FMICMonitor`; it pins and validates six singleton clusters at each synchronization, ignores moment/history values for control decisions, and reports alpha as not applicable.
+  - Added a full-cohort runner that independently executes Phase 2 and Phase 3, compares every bucket's triggers, synchronization, references, allowances, root-known states, and mapped message categories, checks the independent root-state oracle and `18*S + L` ledger, and writes compact deterministic summary/event artifacts with provenance.
+  - Added exact Phase 2 trace output as an opt-in while preserving the existing four-decimal default, plus synthetic lifecycle, boundary, ledger, negative-control, and fresh-process reproducibility tests.
+- Affected files:
+  - scripts/phase2_monitoring.py
+  - scripts/test_phase2_monitoring.py
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/phase3a_protocol_equivalence.py
+  - scripts/test_phase3a_protocol_equivalence.py
+  - scripts/README.md
+  - artifacts/phase3a_protocol_equivalence_summary.json (generated)
+  - artifacts/phase3a_protocol_equivalence_events.csv (generated)
+  - artifacts/phase3a_phase2_two_sided_baseline.json (provenance refresh only)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Establishes a pass/fail no-clustering, equal-allowance reference before US-3.25; the production gate requires exact bucket-level parity, not merely matching totals.
+  - Standard FMIC/SMIC algorithms and their historical outputs are not changed. The new decision trace is in-memory and opt-in; production equivalence outputs remain compact.
+- Validation:
+  - `python -B -m scripts.phase3a_protocol_equivalence`: passed the production gate and all 118 Phase 2/Phase 3 tests, including negative controls and two fresh-process full-cohort replays with byte-identical summary/event output.
+  - `python -B -m scripts.phase2_monitoring`: passed the revised Phase 2 correctness/accounting gate. The revised baseline's provenance hash was refreshed; its 19,984-row event output and substantive results are unchanged.
+  - Production equivalence: 19,984 buckets, 467 synchronizations, 753 sensor alerts, zero mismatches in all per-bucket comparisons, 9,159 messages per implementation, 1,999 true violations, zero false-safe/false-violated states, and zero Phase 3 peer transmissions. Each sensor's trigger count agrees.
+  - Historical signed-margin Phase 2, FMIC/SMIC, US-3.21, and US-3.22 artifacts remained unchanged by SHA-256. Changed implementation syntax checks passed; Pylance reports no diagnostics in the equivalence runner or Phase 2 monitor. Existing timedelta deprecation warnings remain in the Phase 2 test module.
+
 ### Phase 3 protocol comparison instrumentation
 - Summary:
   - Changed the Phase 3 global mean to Python's built-in `sum` over sorted sensor IDs, matching Phase 2's arithmetic expression and ordering.
