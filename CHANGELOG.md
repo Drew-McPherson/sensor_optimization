@@ -6,6 +6,34 @@ This file tracks implemented changes in this repository.
 
 ## 2026-11-10
 
+### Hardened US-3.25 validation, reproducibility, and reporting (US-3.26)
+- Summary:
+  - Moved the initial protected-artifact SHA-256 snapshot ahead of contract, prerequisite, and test validation; partial failures now attempt a final integrity comparison and atomically persist concise diagnostics.
+  - Required a complete, passing 38-pair alpha grid before exploratory minima, checked US-3.25 output fingerprints and seven reference configurations before publication, and recorded hashes for all five executed regression modules.
+  - Added fresh-process replays for C1/C2 and clustered FMIC/SMIC at alpha 0.10 and 0.65; added the saved-result singleton pathway-composition plot, a zero-failure current-run record, and a concise US-3.26 completion summary.
+  - Added regressions for alpha-sensitive source clustering, alpha-order independence, fixed-weight partition comparisons with and without escalation, grid/ranking exclusion, and durable failure recording.
+- Affected files:
+  - scripts/phase3a_us325.py
+  - scripts/test_phase3a_us325.py
+  - scripts/README.md
+  - CHANGELOG.md
+  - artifacts/phase3a_us325_control_results.csv
+  - artifacts/phase3a_us325_control_cluster_size_summary.csv
+  - artifacts/phase3a_us325_alpha_results.csv
+  - artifacts/phase3a_us325_cluster_size_summary.csv
+  - artifacts/phase3a_us325_event_snapshots.csv
+  - artifacts/phase3a_us325_comparison_summary.json
+  - artifacts/phase3a_us325_singleton_communication_composition.png
+  - artifacts/phase3a_us325_failed_configurations.json
+  - artifacts/phase3a_us326_completion_summary.json
+- Rationale and impact:
+  - Makes validation failures inspectable and prevents failed/incomplete runs from being ranked or represented as a successful current run. No validated FMIC/SMIC mathematics, Phase 2 behavior, or scientific conclusions were changed; saved regression fingerprints passed and all 17 protected historical/prerequisite artifacts remained byte-identical.
+- Validation:
+  - `python -B -m unittest scripts.test_phase3a_us325 -q`: 13 focused tests passed.
+  - `python -B -m scripts.phase3a_us325`: full five-module regression suite passed all 135 tests; all 38 clustered configurations and C0/C1/C2 passed correctness/accounting.
+  - All six fresh-process replays passed; C0/C1/C2 remained 9,159/8,964/8,962 messages and 467/457/457 root synchronizations. The established FMIC/SMIC alpha=0.10 and alpha=0.65 values matched.
+  - All five executed test-module hashes were recorded; protected artifact inventory captured and verified 17 unchanged files.
+
 ### Implemented US-3.25 weighting and clustering evaluation
 - Summary:
   - Added a gated runner that reuses the US-3.24 C0 result, runs FMIC/SMIC weighted singleton controls, then validates the complete 19-alpha clustered grid for both methods.

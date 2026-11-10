@@ -875,11 +875,31 @@ FMIC/SMIC, US-3.21, and US-3.22 outputs untouched:
 - Four plots: messages, root synchronizations, mean cluster count, and
   communication composition versus alpha. Singleton controls are references,
   not alpha-dependent runs.
+- `artifacts/phase3a_us325_singleton_communication_composition.png`: the
+  saved-result pathway comparison for C0/C1/C2, with no alpha trajectories.
 
 The summary distinguishes locally resolved checks from root synchronizations
 avoided and reports consecutive repeats only for adjacent buckets with
 unchanged membership and no intervening synchronization. It also documents
 the unchanged `abs(deviation) >= allowance` zero-allowance behavior. A fresh
-process replays FMIC and SMIC at alpha=0.10 and compares their event
-fingerprints; prerequisite and historical artifact hashes are checked before
-and after the workflow.
+process replays C1/C2 and FMIC/SMIC at alpha=0.10 and alpha=0.65, comparing
+correctness, synchronization counts, seven message categories, totals, and
+event fingerprints. The initial protected-artifact inventory is captured
+before prerequisite checks; partial failures attempt a final integrity check
+and atomically write `artifacts/phase3a_us325_failed_configurations.json`.
+Successful runs explicitly replace that diagnostic with a zero-failure record.
+
+### US-3.26 validation hardening and reporting
+
+The US-3.25 runner rejects incomplete or failed alpha grids before exploratory
+ranking, verifies the saved scientific regression fingerprints before updating
+US-3.25 outputs, and records hashes for all five executed test modules. Its
+compact completion record is
+`artifacts/phase3a_us326_completion_summary.json`; it separates validation
+status and unresolved issues from scientific interpretation. The singleton
+communication-composition plot is generated from saved validated controls.
+
+Run the combined validation and reproducibility workflow with
+`python -B -m scripts.phase3a_us325`. It runs the five-module regression suite,
+validates all 38 clustered configurations and fixed controls, generates the
+compact plots/reports, and verifies all six independent fresh-process replays.
