@@ -150,7 +150,165 @@ not hold: 9,118,190 occurrences matched, with 791,153 unmatched occurrences
 in each direction. Inspect the JSON and unmatched CSV for details; matching
 total row counts or key coverage alone does not establish value equivalence.
 
-## Phase 2 Notebook
+## Phase 2 Two-Sided Monitoring (US-3.23)
+
+The shared engine in `scripts/phase2_monitoring.py` now uses policy
+`two_sided_absolute_distance_equal_allowances`. At synchronization it stores
+`abs(threshold - synchronized_mean)` as every participating sensor's allowance.
+Sensors retain signed deviations for audit but trigger on
+`abs(current_value - reference_value) >= allowance`. All simultaneous triggers
+are counted and batched into one root collection. The separate root counts
+one request, one response, and one state update per participating sensor.
+
+The last synchronized root-known `SAFE`/`VIOLATED` state persists between
+synchronizations. Equality with the global threshold is `VIOLATED`; zero
+allowance conservatively triggers even on unchanged readings in the following
+bucket. New references and allowances apply on the next bucket. An already
+violated state no longer schedules a forced synchronization. Initialization,
+membership-change/deferred synchronization, online-only fanout, and undefined
+zero-observation buckets are retained.
+
+### Required matched experiment
+
+From the repository root:
+
+```powershell
+python -B -m scripts.phase2_monitoring
+python -B -m unittest scripts.test_phase2_monitoring scripts.test_phase3_history scripts.test_phase3_monitoring -q
+```
+
+The command resolves repository-relative paths by default (`--root` can point
+to another complete input checkout). It validates the approved configuration:
+A/C/D/E/F/G, 2022-02-24T18:50:00+00:00 through 2022-03-10T15:53:00+00:00
+inclusive, 19,984 consecutive minute buckets, matching epoch timestamps, and
+complete finite readings. The threshold is read at round-trip precision from
+the `phase3a_stable_cohort` p90 statistics row and checked against the config;
+it is not embedded in the monitoring logic.
+
+Only two compact files are written:
+
+- `artifacts/phase3a_phase2_two_sided_baseline.json`: policy, experiment
+  metadata, independent correctness counts, messages/categories, synchronization
+  counts, historical comparison, commands, limitations, and SHA-256 provenance.
+- `artifacts/phase3a_phase2_two_sided_events.csv`: completed synchronization
+  timestamps, causes, trigger IDs, entry/exit reference means and allowances,
+  root/oracle states, and message counts. Numeric event details are displayed
+  at four decimals; all decisions and correctness checks use unrounded inputs.
+
+The matched event CSV explicitly uses LF (`\n`) line endings on every operating
+system (`lineterminator="\n"`), including its final newline. Its explicit column
+order, synchronization-row order, values, and numeric precision are unchanged.
+SHA-256 is calculated from the actual exported file, not reconstructed CSV text.
+
+The historical `phase3a_phase2_baseline.json`, Phase 2 reports, Phase 3 code,
+FMIC/SMIC results, US-3.21 validation, and US-3.22 results/plots are protected
+by before/after hashes. The revised baseline is not substituted into any
+published Phase 3 denominator.
+
+### General Phase 2 notebook
+
+`scripts/build_phase2_temperature_sensors.ipynb` and
+`python scripts\run_phase2_notebook.py` still process the general observed-only
+dataset using the `all_devices_observed` p90; they are not the matched-cohort
+entry point. They now write separate reports:
+
+- `artifacts/phase2_two_sided_temperature_sensors.csv`
+- `artifacts/phase2_two_sided_temperature_metrics.json`
+- `artifacts/phase2_two_sided_data_dictionary.csv`
+- `artifacts/phase2_two_sided_sensor_reduction_analysis.csv`
+
+### Schema and correctness migration
+
+| Historical field | Revised field or interpretation |
+|---|---|
+| `entry_delta_global`, `exit_delta_global_if_resync` | `entry_root_allowance`, `exit_root_allowance_if_resync`: nonnegative absolute distance |
+| `entry_{sensor}_local_margin` | `entry_{sensor}_local_allowance`: equal geometric allowance |
+| `event_{sensor}_margin_proximity_score` | `event_{sensor}_allowance_remaining = allowance - abs(signed_deviation)`; zero reaches the trigger |
+| `event_exit_delta_negative`, `event_resync_consumed_from_prior_row` | Removed; negative-margin cause/priority/scheduling is removed |
+| `exit_resync_scheduled_next_row`, pending-cause fields | Only deferred initialization/membership causes; never scheduled by threshold state |
+| Old synchronization-based `false_safe` | `legacy_event_false_negative`; not a root-state error |
+| `false_alert`, `violation_detection_delay_buckets` | `legacy_event_false_alert`, `legacy_event_sync_delay_buckets` |
+| Confusion/precision/recall/window-delay metrics | Explicit `legacy_event_*` metrics, separate from root-state correctness |
+
+`root_known_state` is checked after bucket protocol actions against the
+independent `oracle_global_state`, calculated from raw observations. The
+`false_safe` and `false_violated` fields now mean actual root-state mismatches,
+not the presence/absence of a same-minute synchronization. A quiet, correctly
+known `VIOLATED` bucket is not an error. The matched runner stops on either
+mismatch, missing root knowledge, input/membership failures, or unreconciled
+messages. The oracle never controls communication. With no observations,
+root/oracle output states are `UNDEFINED` and mismatch fields are blank.
+
+Validation combines three complementary checks:
+
+- **Consistency replay:** `check_trace_invariants()` reconstructs expected trace
+  fields and state transitions from raw observations. It does not call the
+  production builder or trust its synchronization flags, but reconstructs
+  substantial parts of the same state machine. Replay checks (including those
+  described in historical sections below) are not independent mathematical
+  proof of algorithm correctness.
+- **Independent correctness oracle:** `evaluate_root_states()` compares the
+  root-known threshold state with the true centralized threshold state from raw
+  observations, offline and without influencing monitoring or communication.
+- **Synthetic regression tests:** independently specified fixtures, threshold
+  boundaries, hand-counted transmissions, and deliberately injected defects
+  check expected behavior and validator sensitivity.
+
+### Validated outcome (2026-11-10)
+
+The revised matched run has **9,159 messages** (753 triggers and 2,802 each of
+requests, responses, and updates), **467 synchronizations**, 1,999 violated
+buckets, and zero false-safe/false-violated states over all 19,984 buckets.
+The historical signed-margin benchmark remains **38,087 messages / 2,107
+synchronizations**. The aggregate changes are -28,928 messages and -1,640
+synchronizations; these do not isolate the effect of removing scheduling from
+the consequential absolute-trigger and synchronization-timeline changes.
+
+The existing Phase 3 results are historical context only, not a fully controlled
+clustering comparison with this revised baseline: moment-based allowances and
+coordinator/cluster protocols remain potential confounders. No new Phase 3
+experiment or universal performance claim is introduced.
+
+Validation passed **104 Phase 2/Phase 3 tests**, including all Phase 2 notebook
+code cells on synthetic inputs, root-state defect injection in both directions,
+and protected-output checks. The fresh-process reproducibility check is automated:
+
+```powershell
+python -B -m unittest scripts.test_phase2_monitoring.MatchedProductionTests.test_fresh_process_reproducibility_and_lf_events -v
+```
+
+It invokes the existing matched-run CLI twice in separate Python subprocesses
+with isolated temporary directories and identical deterministic synthetic inputs,
+config, and threshold. The required 19,984-bucket grid uses constant violated/safe
+segments, not a second production-data replay. Both executions must produce
+byte-identical baseline JSON and LF-only event CSV, identical actual SHA-256
+hashes, and the expected numerical/correctness results and hand-counted 42
+transmissions / two synchronizations. Every input and historical/Phase 3 sentinel
+is checked for preservation. No metadata fields are excluded from comparisons.
+Cross-platform LF policy applies to the event CSV; complete baseline provenance
+also includes platform-dependent relative path separators and input/code hashes.
+
+One production replay confirmed that the maintenance change preserved every
+numerical result above and all 23 protected file hashes. The exported events
+equal the previous bytes with only CRLF replaced by LF (468 line endings).
+The intentional event SHA-256 change is:
+
+- Before (CRLF):
+  `881cbd6d225533c2194372a470d9bf66969ae74a4e6eabaf9f60dcf386114fea`
+- After (LF):
+  `446d2e0b552ba603a0815e3275f5eba37513ac3298a63fb5129029dc3fba1d2e`
+
+This is serialization normalization, not an algorithm regression. Monitoring
+policy, synchronization logic, message accounting, and numerical experiment
+results are unchanged. The regenerated baseline records the new event/code hashes
+and unchanged protected before/after hashes.
+
+## Historical Phase 2 Notebook (before US-3.23)
+
+The remainder of this Phase 2 description records the original signed-margin
+policy and historical artifact schema. It does **not** describe the current
+engine, output paths, or root-state correctness semantics; use the US-3.23
+instructions above for new runs. Historical output files are preserved unchanged.
 
 ### Notebook
 - `scripts/build_phase2_temperature_sensors.ipynb`
@@ -584,6 +742,15 @@ same-allocation protocol equivalence tests. No separate SMIC protocol is kept.
 Sensor moments or weights fit in existing root-sync responses; allocated
 allowances fit in existing bundled updates, so no extra exchanges are charged.
 This project counts transmissions, not scalar payload fields or bytes.
+The global mean uses Python's built-in `sum` over sensor IDs in sorted order,
+matching Phase 2's arithmetic and ordering for protocol comparisons. Its
+floating-point result can differ from `math.fsum` depending on Python version
+and values; exact and near-boundary tests remain important because a rounding
+difference can change a trigger or threshold decision. `capture_decisions=True`
+optionally retains a compact in-memory,
+per-bucket trace of entry references/allowances/state, triggering sensor IDs,
+synchronization decisions, post-sync state, and message counts. It is disabled
+by default and does not write or alter production artifacts.
 
 Execute all notebook cells to generate both outputs, or load its definition cells
 and call `run_phase3a_fmic(REPO_ROOT)` / `run_phase3a_smic(REPO_ROOT)` separately.

@@ -19,6 +19,29 @@ CSV-first report artifacts are generated directly by the Phase 2 notebook run:
 3. [artifacts/phase2_data_dictionary.csv](artifacts/phase2_data_dictionary.csv)
 4. [artifacts/phase2_sensor_reduction_analysis.csv](artifacts/phase2_sensor_reduction_analysis.csv)
 
+## US-3.23 reproducibility and validation
+
+The matched Phase 2 event CSV explicitly uses LF (`\n`) line endings on every
+platform, with unchanged column/row ordering, values, and precision. Its SHA-256
+changed intentionally from CRLF normalization only; monitoring policy and all
+production numerical results remain unchanged. Historical Phase 2 and published
+US-3.21/US-3.22 artifacts are preserved.
+
+Run the automated two-fresh-process synthetic regression from the repository root:
+
+```powershell
+python -B -m unittest scripts.test_phase2_monitoring.MatchedProductionTests.test_fresh_process_reproducibility_and_lf_events -v
+```
+
+Validation distinguishes state-machine **consistency replay** (not independent
+proof), the offline **independent root-state correctness oracle** against
+centralized observations, and **synthetic regression tests** with independently
+specified fixtures, boundaries, hand counts, and injected defects.
+See [US-3.23 details](scripts/README.md#phase-2-two-sided-monitoring-us-323) for
+old/new event hashes, production metrics, full-suite commands, and provenance
+comparison scope. The reproducibility test compares complete deterministic
+summaries and byte-identical CSVs without rerunning the production dataset.
+
 ## Instruction documents
 
 Instruction-style documentation now lives under [instructions](instructions):

@@ -4,6 +4,73 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-11-10
+
+### Phase 3 protocol comparison instrumentation
+- Summary:
+  - Changed the Phase 3 global mean to Python's built-in `sum` over sorted sensor IDs, matching Phase 2's arithmetic expression and ordering.
+  - Added opt-in `capture_decisions` instrumentation retaining compact per-bucket entry references, allowances, known state, triggering sensor IDs, synchronization outcome, post-sync state, and transmission counts in memory only.
+  - Added regression tests and documented the rounding trade-off and trace behavior.
+- Affected files:
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/test_phase3_monitoring.py
+  - scripts/README.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Aligns Phase 3's mean calculation with Phase 2 for protocol-equivalence comparisons; floating-point results can still differ from `math.fsum` by Python version and input values, so boundary tests remain necessary.
+  - Decision tracing is disabled by default and does not change standard saved FMIC/SMIC artifacts.
+- Validation:
+  - `python -B -m unittest scripts.test_phase3_monitoring scripts.test_phase2_monitoring -q`: 91 tests passed.
+  - The edited notebook JSON and Phase 3 implementation cell compile successfully; Pylance reported no syntax errors in the Phase 3 test module.
+
+### US-3.23 reproducibility and validation maintenance
+- Summary:
+  - Explicitly export matched Phase 2 event CSVs with LF line endings, retaining existing ordered columns/rows, values, precision, and actual-file SHA-256 calculation.
+  - Reuse the matched synthetic fixture for an automated two-subprocess regression with isolated temporary roots, exact baseline/event byte comparisons, expected numerical/correctness/count checks, and protected-input/history checks.
+  - Clarify consistency replay versus the independent offline root-state oracle and independently specified synthetic tests; document the targeted regression command and normalization-only hash change.
+- Affected files:
+  - scripts/phase2_monitoring.py
+  - scripts/test_phase2_monitoring.py
+  - scripts/README.md
+  - README.md
+  - artifacts/phase3a_phase2_two_sided_events.csv (generated)
+  - artifacts/phase3a_phase2_two_sided_baseline.json (generated provenance)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Prevents platform-default CSV newlines from changing event hashes. The new production event bytes equal the previous bytes with only 468 CRLF endings replaced by LF.
+  - Old event SHA-256: `881cbd6d225533c2194372a470d9bf66969ae74a4e6eabaf9f60dcf386114fea`.
+  - New event SHA-256: `446d2e0b552ba603a0815e3275f5eba37513ac3298a63fb5129029dc3fba1d2e`.
+  - No monitoring mathematics, synchronization, message accounting, configuration, or numerical results changed. Baseline provenance reflects the updated code/event hashes; historical Phase 2 and US-3.21/US-3.22 artifacts are unchanged.
+- Validation:
+  - `python -B -m unittest scripts.test_phase2_monitoring scripts.test_phase3_history scripts.test_phase3_monitoring -q`: 104 tests passed, including the new fresh-process regression and all existing Phase 2 tests.
+  - One production matched replay retained A/C/D/E/F/G, 19,984 buckets, p90 22.428666649999997, 1,999 violations, zero false-safe/false-violated states, 467 synchronizations, 753 triggers, 2,802 each requests/responses/updates, and 9,159 messages. All non-provenance summary fields and 23 protected file hashes were unchanged.
+  - Pylance syntax checks passed for both Python files.
+
+### Implemented US-3.23 two-sided equal-allowance Phase 2 monitoring
+- Summary:
+  - Updated the existing shared Phase 2 engine to use absolute distance to the threshold, absolute local-deviation triggers, and retained root-known SAFE/VIOLATED state; removed negative-margin scheduling.
+  - Added an independent offline two-sided root-state oracle and a locked matched-run CLI that writes a separately named revised baseline and compact synchronization events.
+  - Migrated the Phase 2 notebook, metrics, dictionary, and validation to explicit allowance/root-state fields and separate legacy event diagnostics. General notebook output filenames now use `phase2_two_sided_*` to avoid overwriting historical files.
+  - Added synthetic boundary, cooling/warming, zero-allowance, communication/oracle-control, historical-output-preservation, and matched-run input/provenance tests; documented policy, schema migration, commands, results, and remaining confounders.
+- Affected files:
+  - scripts/phase2_monitoring.py
+  - scripts/test_phase2_monitoring.py
+  - scripts/build_phase2_temperature_sensors.ipynb
+  - scripts/README.md
+  - Distributed_Monitoring_POC_Project_Plan.md
+  - Phase3A_Pivot_Plan.md
+  - artifacts/phase3a_phase2_two_sided_baseline.json (generated)
+  - artifacts/phase3a_phase2_two_sided_events.csv (generated)
+  - CHANGELOG.md
+- Rationale and impact:
+  - Repairs the threshold-policy comparability issue while preserving Phase 2's non-clustered equal allowances, initialization, availability/deferred synchronization, next-bucket reference activation, and actual-transmission accounting.
+  - Revised matched run: 19,984 buckets, p90 22.428666649999997, 1,999 truly violated buckets, zero false-safe/false-violated states, 9,159 messages, and 467 synchronizations. Categories reconcile to 753 triggers plus 2,802 each of requests, responses, and updates.
+  - The historical 38,087-message / 2,107-synchronization benchmark and all existing Phase 3 inputs, code, FMIC/SMIC artifacts, validation, and US-3.22 results/plots were preserved by hash. No Phase 3 denominator was replaced. Aggregate reductions are not a causal isolation of scheduling, clustering, moment weighting, or coordinator protocols.
+- Validation:
+  - `python -B -m unittest scripts.test_phase2_monitoring scripts.test_phase3_history scripts.test_phase3_monitoring -q`: 103 tests passed, including every Phase 2 notebook code cell on synthetic fixtures.
+  - `python -B -m scripts.phase2_monitoring`: two fresh-process runs passed all correctness/input/accounting gates and produced byte-identical revised baseline and event files; protected historical hashes were unchanged.
+  - Pylance syntax checks passed for the implementation and test module.
+
 ## 2026-11-03
 
 ### Completed US-3.22 alpha sensitivity and matched comparison

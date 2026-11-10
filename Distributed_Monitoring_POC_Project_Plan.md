@@ -2,6 +2,8 @@
 
 Revision focus (2026-11-03): sponsor-approved Phase 3A stable-cohort pivot, matched Phase 2/FMIC/SMIC comparison, cohort-specific thresholding, compact reproducible outputs, and optional Phase 3B availability robustness. **Synchronization update through US-3.22:** Sections 2, 4, 6–11, 13, and 14 reflect the implementation decisions and validation results recorded in the Pivot Plan.
 
+**Policy update (2026-11-10, US-3.23):** Phase 2 now uses two-sided absolute distance and equal allowances. The revised matched baseline is separately named; all US-3.22 figures and denominators remain historical and unchanged. See Section 14.4. No FMIC/SMIC code, weighting, clustering, or protocol was changed.
+
 ## 1) How To Read This Plan
 
 This document has two layers:
@@ -154,12 +156,12 @@ Interpretation rule: the initial clustering experiment remains temperature-only.
 Per minute bucket:
 1. Determine the online set from valid Phase 1 observations and compare it to the preceding bucket; availability detection costs no messages.
 2. Compute the mean from current online readings, or record undefined global state when there are none.
-3. Initialization, membership changes, and pending negative-margin events force synchronization and skip local-trigger evaluation.
-4. Otherwise evaluate delta_v_i(t) >= margin_i using entry references for online sensors; any local trigger causes one synchronization.
-5. Combine coinciding causes into at most one synchronization per bucket, preserving all causes with negative-margin precedence.
+3. Initialization and membership changes, including deferred causes, force synchronization and skip operational local-trigger evaluation.
+4. Otherwise evaluate `abs(delta_v_i(t)) >= abs(threshold - synchronized_mean)` using entry references and equal allowances; any local trigger causes one synchronization.
+5. Combine coinciding causes into at most one synchronization per bucket, preserving all causes with initialization then membership precedence.
 6. A completed synchronization contacts only online sensors, counting N requests, N responses, and N threshold updates. Local-trigger messages are counted only when actually generated.
 7. When all sensors are offline, send nothing, retain pending causes, and wait for observations to return; do not reuse a prior mean as the current observation.
-8. Apply synchronized references/margins starting next row; a negative exit margin schedules synchronization for the next row.
+8. Apply synchronized references/allowances starting next row. Retain the last verified root-known SAFE/VIOLATED state between synchronizations; being above threshold does not schedule another synchronization.
 
 Consistency note:
 1. Phase 2 uses local constraints as an operational sufficient-condition proxy for the DDS aggregate deviation bound.
@@ -168,7 +170,7 @@ Consistency note:
 Interpretation:
 1. False alarms are acceptable trade-offs for safer coverage.
 2. Communication naturally clusters near high-temperature periods.
-3. The system is deterministic and auditable, but still evaluated using classification-style diagnostics.
+3. Root-known-state correctness is checked against an independent offline oracle; same-minute synchronization-versus-violation metrics are separately labeled legacy diagnostics.
 
 ---
 
@@ -197,7 +199,7 @@ Required columns in aligned Phase 1 input:
 1. Start with undefined global/per-sensor references and margins, no prior membership set, and initialization pending.
 2. The first bucket's observed set establishes initial membership without fabricating departure/return events.
 3. Leading buckets without readings remain undefined, pending, and message-free. Never borrow values from a later row.
-4. At the first usable bucket, complete initialization: synchronize the observed mean and online per-sensor readings, with equal local margins `p90 - synchronized_mean`.
+4. At the first usable bucket, complete initialization: synchronize the observed mean and online per-sensor readings, with equal local allowances `abs(p90 - synchronized_mean)` and a verified root-known state (SAFE below p90, VIOLATED at or above).
 5. Count N requests, N responses, and N threshold updates for the N online sensors, with zero local triggers. Record `event_initialization_performed` and `initialization_message_count`.
 6. Newly synchronized references and margins become next-row entry state. Sensors absent from synchronization have undefined references/margins; returning sensors force synchronization before local evaluation.
 
@@ -206,12 +208,12 @@ For each row t:
 1. Read prior committed state into `entry_*`; determine current online sensors, departures, and returns from valid observations after Phase 1 freshness filtering.
 2. Add membership changes and initialization to pending synchronization causes. A departure is the first missing bucket and a return is the first subsequent valid bucket.
 3. If any forced cause is present, suppress operational local triggers and keep trigger bits/messages zero, but calculate local deviations and constraint comparisons against valid entry references for reporting. Complete synchronization only if at least one sensor is online; otherwise retain pending causes without traffic.
-4. Without forced causes, compute online sensors' deviations from entry references and trigger when `deviation >= margin`. Any triggering sensors produce their trigger messages and one synchronization.
+4. Without forced causes, compute signed deviations from entry references and trigger when `abs(deviation) >= allowance`. All triggering sensors produce their trigger messages and one synchronization.
 5. At synchronization, set the exit global reference to the current observed mean, set online references/margins from current observations, and invalidate references/margins for excluded sensors.
 6. Count request/response/update fanout using the online count, not the configured cohort size. All membership status detection is free.
 7. Record all causes, primary reason, completed/pending status, and membership changes. Causes sharing one synchronization do not create duplicate traffic.
 8. The actual label is `observed_global_average >= p90` for evaluable rows, otherwise undefined. Diagnostic predicted positive remains `event_resync_performed`, not a claim of threshold violation.
-9. Carry new state into row t+1; schedule a negative-margin synchronization when the exit synchronized margin is negative, retaining it through empty buckets until synchronization can complete.
+9. Carry new references/allowances into row t+1 without negative-margin scheduling. Zero allowance still triggers conservatively with `>=`, including unchanged readings in the next bucket. Root-known state is updated after this bucket's completed synchronization; the offline oracle never controls communication.
 
 ### 6.5 Row Invariants
 For each exported row:
@@ -220,31 +222,30 @@ For each exported row:
 3. `event_*` fields record outcomes produced during the current minute.
 4. `exit_*` fields describe the state committed at the end of the row and carried into the next row.
 5. `transition_summary` is an early-row audit field summarizing the row's event and exit-state transitions.
-6. `distributed_constraint_state` is `VIOLATING` if any observed sensor meets/exceeds its entry local allowance, including reporting-only comparisons on forced rows. `FEASIBLE` requires complete comparison coverage with no violation; incomplete coverage is `NOT_EVALUABLE`, and no observations is `UNDEFINED`.
+6. `distributed_constraint_state` is `VIOLATING` if any absolute observed sensor deviation meets/exceeds its entry local allowance, including reporting-only comparisons on forced rows. `FEASIBLE` requires complete comparison coverage with no violation; incomplete coverage is `NOT_EVALUABLE`, and no observations is `UNDEFINED`.
 7. `centralized_constraint_state` remains the observed global p90 oracle; `event_resync_performed` records the independent operational synchronization action. The redundant `distributed_alert` alias is removed.
 8. The existing module independently replays reference state from unrounded inputs to validate the full trace before rounding and after CSV export. Exact boundary decisions use original inputs; numeric CSV comparisons use four-decimal tolerance. Violations identify the bucket and field.
 
 ### 6.6 Required Phase 2 Output Schema
-artifacts/phase2_temperature_sensors.csv must include:
+The general revised notebook writes `artifacts/phase2_two_sided_temperature_sensors.csv`; historical `phase2_temperature_sensors.csv` is preserved. The revised trace includes:
 1. bucket_epoch, bucket_time_utc.
 2. early audit fields: transition_summary, p90_threshold_used.
-3. row-level global timing fields: observed_global_average, entry_xbar_t0, entry_delta_global; exit global state is represented by the adjacent optional resync-result fields.
-4. optional resync-result fields: exit_xbar_t0_if_resync, exit_delta_global_if_resync.
+3. row-level global timing fields: observed_global_average, entry_xbar_t0, entry_root_allowance; exit global state is represented by the adjacent optional resync-result fields.
+4. optional resync-result fields: exit_xbar_t0_if_resync, exit_root_allowance_if_resync. Allowance fields explicitly replace signed-delta fields with nonnegative absolute-distance semantics.
 5. per-sensor current value, synchronized entry reference value, event-local deviation, and entry local allowance fields.
 6. one binary event-local trigger/re-sync-request flag per sensor (for example event_A_resync_requested).
 7. event_triggering_sensor_names, event_resync_request_count, event_any_sensor_requested_resync.
 8. re-sync execution and scheduling fields: event_resync_performed, event_initialization_performed, event_resync_triggered_by_membership_change, exit_resync_scheduled_next_row, exit_resync_pending, exit_resync_pending_causes. Consumption/local-cause helper bits remain internal; event_resync_causes preserves their meaning in the public trace.
-9. synchronization reason fields (for example local_constraint_violation, negative_delta_from_prior_row).
+9. synchronization reasons: initialization, sensor_membership_changed, local_constraint_violation. Negative-margin causes and diagnostic/control fields are removed.
 10. communication event fields: trigger_message_count, request_message_count, response_message_count, broadcast_message_count, total_message_count.
 11. membership/evaluability fields: observed_online_sensor_names, observed_online_sensor_count, event_departing_sensor_names, event_returning_sensor_names, event_membership_changed, global_state_evaluable.
 12. cause-attribution fields: membership_resync_message_count and initialization_message_count. These may overlap and must not be added to transmission-type totals.
-13. constraint/diagnostic fields: centralized_constraint_state, distributed_constraint_state, global_violation, false_safe, false_alert, violation_detection_delay_buckets. `distributed_alert` is not exported.
+13. root-state fields: root_known_state, oracle_global_state, false_safe, false_violated, root_state_not_evaluable; policy identifier threshold_policy. Local/centralized constraint fields remain separate. Legacy event diagnostics are explicitly renamed legacy_event_false_negative, legacy_event_false_alert, and legacy_event_sync_delay_buckets; distributed_alert is not exported.
 
 Implementation precedence rule for `event_resync_reason` when more than one cause is possible in the same row:
-1. `negative_delta_from_prior_row`
-2. `initialization`
-3. `sensor_membership_changed`
-4. `local_constraint_violation`
+1. `initialization`
+2. `sensor_membership_changed`
+3. `local_constraint_violation`
 
 Record every cause in `event_resync_causes`, including deferred membership events. Forced synchronization rows suppress local triggers. The legacy conditional `sensor_recovered_after_offline` path is replaced by detection of every departure/return.
 
@@ -254,13 +255,13 @@ Required implementation artifact:
 2. scripts/phase2_monitoring.py, the state machine used by the notebook and synthetic tests.
 3. scripts/test_phase2_monitoring.py, run with `python -m unittest scripts.test_phase2_monitoring -v`.
 
-This is the existing general Phase 2 monitoring engine and remains unchanged by the Phase 3A pivot. The historical full-data run may continue to exercise its availability-aware behavior. For the Phase 3A matched baseline, reuse this same engine after filtering to the locked six-sensor cohort and interval and reading the Phase 3A-specific p90. No separate Phase 2 implementation or alternate monitoring state machine is required.
+This is the existing general Phase 2 monitoring engine, updated by US-3.23 without removing its availability-aware behavior. Run `python -B -m scripts.phase2_monitoring` for the separately named revised matched baseline; it filters and validates the locked six-sensor cohort and interval and reads the Phase 3A-specific p90. No separate Phase 2 implementation or alternate monitoring state machine is required.
 
 Notebook sections (cells):
 1. Load input artifacts and constants.
 2. Derive p90 and discover sensor columns.
 3. Execute deterministic row-wise state machine.
-4. Export phase2_temperature_sensors.csv.
+4. Export separately named phase2_two_sided_temperature_sensors.csv.
 5. Compute and export diagnostics summary.
 
 ### 6.8 Phase 3A Experiment Input Contract
@@ -302,7 +303,7 @@ Source-alignment checkpoints:
 4. Each cluster uses the existing deterministic coordinator-selection rule unless a later pivot story explicitly changes it. A singleton coordinates itself.
 5. Cluster/coordinator information may travel with normal synchronization threshold updates; no duplicate standalone formation traffic is created unless the implementation actually transmits it.
 6. Each completed root synchronization records the six-sensor global mean and its **root-known state**: safe if `mean < p90`, violated if `mean >= p90`. The root allowance is `abs(global_mean_at_sync - p90)`, so it is never negative. Equality with p90 is **violated** and gives zero allowance.
-7. FMIC and SMIC use **two-sided threshold monitoring**. Their local and coordinator checks must ensure that a change from the last root-known safe/violated state cannot be missed. Node-level violations remain observable even if signed cluster cancellation makes a root check unnecessary. An already-violated mean does not by itself cause forced synchronization; do **not** import Phase 2's negative-margin forced-resynchronization rule.
+7. FMIC and SMIC use **two-sided threshold monitoring**. Their local and coordinator checks must ensure that a change from the last root-known safe/violated state cannot be missed. Node-level violations remain observable even if signed cluster cancellation makes a root check unnecessary. An already-violated mean does not by itself cause forced synchronization; do **not** import historical Phase 2's negative-margin forced-resynchronization rule (removed from Phase 2 by US-3.23).
 8. If a coordinator check cannot establish that the root-known state remains valid, it escalates to the separate root component. A completed root synchronization recalculates the actual mean, records the state, recomputes moment-based allowances, and refreshes references and clusters for the next bucket. Cluster checks and root collections follow the shared FMIC/SMIC engine, but **their event times may differ** from Phase 2 and from each other.
 9. The true global mean computed from all six readings is available for **offline evaluation only**, not for deciding whether online communication is triggered. Both false-safe and false-violated counts must be zero for the run to be marked `passed`; the correctness comparison is with the actual six-sensor threshold state, **not the Phase 2 synchronization schedule**.
 10. Availability-aware branches already built may be retained for optional Phase 3B, but Phase 3A code should remove or isolate them so they do not complicate the primary path.
@@ -704,6 +705,7 @@ Phase 3B is optional and not required for the above checklist. If approved later
 | US-3.20 | Add SMIC's second moment to the shared monitoring engine and confirm FMIC regression behavior | Implemented and reviewed |
 | US-3.21 | Comprehensive synthetic and mathematical validation across both algorithms | Implemented and passed; 91 tests |
 | US-3.22 | Required 19-alpha sensitivity sweep for each algorithm and final matched evaluation | Implemented and passed; 38 full-length runs |
+| US-3.23 | Two-sided equal-allowance Phase 2 policy and separately named matched baseline | Implemented and passed; 103 regression tests |
 
 ### 14.1 Prespecified alpha-0.10 comparison
 
@@ -746,3 +748,31 @@ The 0.65 values are minimum observed on this single dataset and tested grid, not
 - **Optional, not part of Phase 3A acceptance:** Phase 3B intermittent-sensor experiments.
 
 For the complete step-by-step explanation of why and how the changes were made, refer to `Phase_3A_Pivot_Plan.md`, §22.
+
+### 14.4 US-3.23 revised Phase 2 baseline (2026-11-10)
+
+The shared Phase 2 engine now uses `abs(threshold - synchronized_mean)` and
+absolute local deviations, retaining a verified root-known SAFE/VIOLATED state.
+Negative-margin scheduling is removed; membership, initialization, next-bucket
+activation, and actual-transmission accounting are retained.
+
+The approved 19,984-bucket matched run passed with **9,159 messages**:
+753 triggers plus 2,802 requests, 2,802 responses, and 2,802 state updates.
+There were **467 synchronizations**, zero membership changes, 1,999 truly
+violated buckets, and **zero false-safe and false-violated states**.
+The historical 38,087-message / 2,107-synchronization benchmark remains
+unchanged. The aggregate policy difference is -28,928 messages and -1,640
+synchronizations; no separate causal attribution is inferred from those totals.
+
+The revised artifacts are `phase3a_phase2_two_sided_baseline.json` and
+`phase3a_phase2_two_sided_events.csv`. The summary records the policy, commands,
+input/config/code hashes, independent root-state correctness, historical
+comparison, and before/after hashes for protected outputs. The notebook's
+general full-data reports use the `phase2_two_sided_*` prefix.
+
+Sections 14.1–14.2 and published US-3.22 artifacts retain the original Phase 2
+denominator as a historical experiment record. No Phase 3 code or outputs were
+changed. Any revised Phase 2 versus FMIC/SMIC interpretation remains preliminary:
+moment-based allowances and coordinator/cluster protocols are not isolated by
+this story. This does not evaluate intermittent availability or establish
+universal algorithm superiority.
