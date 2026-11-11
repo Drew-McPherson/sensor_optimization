@@ -32,4 +32,15 @@ artifacts/*.json
 artifacts/*.log
 artifacts/transformation_decisions.md
 artifacts/phase1_duplicate_qc/
+artifacts/phase3_baseline_us327/
+artifacts/phase3_extraction_us328/
+artifacts/phase3_production_us329/
+artifacts/phase3_testing_us330/
+artifacts/phase3_analysis_us331/
+artifacts/phase3_outputs/
+artifacts/phase3_operational/
+artifacts/phase3_archive/
+artifacts/phase2_current/
+artifacts/phase3_cutover_us332/
+artifacts/phase3_artifacts_us333/
 !artifacts/README.md

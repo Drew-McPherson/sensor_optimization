@@ -58,7 +58,7 @@ def _ensure_dependencies(repo_root: Path) -> None:
 def _preflight(repo_root: Path, notebook_path: Path) -> None:
     related_docs = [
         "Distributed_Monitoring_POC_Project_Plan.md",
-        "scripts/README.md",
+        "scripts/README_scripts.md",
         "instructions/PYTHON_ENV_SETUP_GUIDE.md",
         "instructions/distributed_monitoring_notebook_required_changes.md",
     ]

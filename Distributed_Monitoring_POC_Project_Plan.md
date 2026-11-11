@@ -6,6 +6,16 @@ Revision focus (2026-11-03): sponsor-approved Phase 3A stable-cohort pivot, matc
 
 ## 1) How To Read This Plan
 
+**Execution architecture update (2026-11-11, US-3.32):** Phase 3 has exactly
+three maintained executable files: [`scripts/phase3_implement.py`](scripts/phase3_implement.py),
+[`scripts/phase3_test.py`](scripts/phase3_test.py), and
+[`scripts/phase3_analyze.ipynb`](scripts/phase3_analyze.ipynb). The implementation
+defaults to the revised C0/C1/C2 plus 38 clustered evaluations; tests are external
+and analysis reads saved results only. Notebook-only execution/tagged-cell
+loading requirements are superseded. The original notebook and compatibility
+modules are retired after full-matrix equivalence; historical scientific findings
+below remain historical. See [current commands and rollback](scripts/README_scripts.md#us-332-three-file-workflow-and-verified-cutover).
+
 This document has two layers:
 1. Discussion view for stakeholder alignment.
 2. Implementation view with deterministic rules that can be coded directly.
@@ -576,8 +586,9 @@ No availability sensitivity or attribution run is required for Phase 3A. If Phas
 ### Code And Execution
 1. `scripts/build_phase1_temperature.py` — existing transformation, with minimal statistics extension if that is the current statistics-generation location.
 2. `scripts/build_phase2_temperature_sensors.ipynb` and `scripts/phase2_monitoring.py` — existing Phase 2 implementation reused for the matched Phase 3A baseline.
-3. `scripts/build_phase3_temperature_clustering.ipynb` — existing Phase 3 clustering foundation simplified for stable-cohort Phase 3A and extended with FMIC/SMIC.
-4. Focused Phase 3A synthetic/formula-level test harness. Existing test files may be refactored or supplemented rather than multiplied unnecessarily.
+3. `scripts/phase3_implement.py` — import-safe Phase 3 algorithms, revised production, isolated runtime equivalence, and read-only replays.
+4. `scripts/phase3_test.py` — independent behavioral, saved-output, and fresh-process verification; Phase 1/2 suites remain independently owned dependencies.
+5. `scripts/phase3_analyze.ipynb` — existing saved-result analysis, inline charts, and Markdown interpretation, with no production execution.
 
 ### Data And Result Artifacts
 Target Phase 3A artifacts are intentionally small:

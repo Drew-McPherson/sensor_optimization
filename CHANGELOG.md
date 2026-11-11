@@ -4,7 +4,239 @@ This file tracks implemented changes in this repository.
 
 ## Logging Policy
 
+## 2026-11-11
+
+### Restored the GitHub root README filename
+- Summary: Restored the project overview to the root `README.md` filename while keeping the scripts and artifacts guides purpose-specific.
+- Affected files: `README.md`, `CHANGELOG.md`, `User Stories/US-3.34_organize_phase3_outputs_operational_and_archive.md`.
+- Rationale and impact: GitHub automatically recognizes a root `README.md` for repository landing-page display. The overview's links still point to `scripts/README_scripts.md` and `artifacts/README_artifacts.md`; no runtime behavior changes.
+- Validation: Verified the root README and its links to the purpose-specific guides.
+
+### Renamed purpose-specific README documents
+- Summary: Kept the script workflow guide and artifact inventory as `scripts/README_scripts.md` and `artifacts/README_artifacts.md`; the root project overview remains `README.md` for GitHub landing-page display. Updated active documentation links, notebook guidance, preflight output, and the Phase 3 path-safety test.
+- Affected files: `README.md`, `scripts/README_scripts.md`, `artifacts/README_artifacts.md`, `scripts/run_phase2_notebook.py`, `scripts/phase3_test.py`, `scripts/build_phase2_temperature_sensors.ipynb`, `Distributed_Monitoring_POC_Project_Plan.md`, `User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md`, `User Stories/US-3.34_organize_phase3_outputs_operational_and_archive.md`, `CHANGELOG.md`.
+- Rationale and impact: The three documents have distinct audiences and scopes; the two nested guides have descriptive names, while the root overview uses GitHub's conventional README filename. The separate `instructions/README.md` directory index is unchanged. No script behavior, data, or output format changes.
+- Validation: Verified all renamed-file links and path references, and ran the focused path-safety test.
+
+### Specified three-folder Phase 3 artifact cleanup (US-3.34)
+- Summary: Created one user story for renaming phase3_current to phase3_outputs, separating necessary operational artifacts into phase3_operational, safely consolidating operational evidence, and moving unneeded files into the user-removable phase3_archive queue.
+- Affected files: User Stories/US-3.34_organize_phase3_outputs_operational_and_archive.md; CHANGELOG.md.
+- Rationale and impact: Defines dependency classification, versioned mappings, independent-reference preservation, coordinated writer/test/notebook changes and verification with archive/old paths physically absent. Acknowledges that previous migration folders have already been archived. This is a specification only; no runtime code, artifact contents, formats or locations were changed.
+- Validation: Documentation-only change; reviewed against the existing user-story format and current workspace inventory. Implementation and execution verification are deferred to the story.
+
+### Implemented and verified Phase 3 outputs/operational/archive layout (US-3.34)
+- Summary:
+  - Changed the default user-facing bundle to `artifacts/phase3_outputs/` and split its user-readable `phase3_summary.json` from the schema-version-2 operational manifest, complete C0 events, and independent validation receipt in `artifacts/phase3_operational/`.
+  - Relocated 14 SHA-256-verified independent references into `phase3_operational/references/`; rewired Phase 2's historical-baseline lookup, Phase 3 implementation/tests, and saved-only analysis for the paired directories and candidate workflows.
+  - Preserved the former six-file `phase3_current/` bundle and 28 superseded root-level Phase 3 files under the user-removable `phase3_archive/`; no archive contents are automatically deleted. The independently owned root-level Phase 2 two-sided baseline/events remain outside this cleanup.
+- Affected files:
+  - `scripts/implement_phase3.py`, `scripts/test_phase3.py`, `scripts/phase2_monitoring.py`, `scripts/test_phase2_monitoring.py`, `scripts/analyze_phase3.ipynb`
+  - `README.md`, `scripts/README.md`, `artifacts/README.md`, `.gitignore`
+  - `User Stories/US-3.34_organize_phase3_outputs_operational_and_archive.md`, `CHANGELOG.md`
+  - `artifacts/phase3_outputs/`, `artifacts/phase3_operational/`, `artifacts/phase3_archive/`
+- Rationale and impact:
+  - Separates four user-facing results from three machine-owned run files and retained independent references. The old mixed-purpose `phase3_run.json` is split into an output summary and a schema-version-2 manifest with explicit same-run/hash-checked receipt linkage and durable in-progress/failure state.
+  - Result, size, snapshot, and C0 event CSVs remained byte-identical to the former bundle. Phase 2 monitoring/scientific behavior and independently owned outputs were preserved; the root historical-baseline relocation is a path-only change, with its original producer hash explicitly pinned and documented.
+  - Added output-directory creation for isolated candidates and normalized relative output paths before validating paired manifest locations.
+- Validation:
+  - Passed the full final-source receipt gate: 166 Phase 3 behavioral/replay and independent Phase 1/Phase 2 tests, zero skips/failures/errors.
+  - Candidate and default production passed; saved-output verification and all six fresh-process replays passed for both pairings. Compared all result rows against independent references and confirmed byte identity for the three scientific CSVs and C0 events.
+  - Both candidate and default analysis passed from clean kernels with the historical view enabled (12 displayed tables, 8 figures, no writes).
+  - Repeated the full gate, default production, saved checks, replays, and notebook analysis with `phase3_archive/`, `phase3_current/`, and all old root-level Phase 3 paths physically unavailable. Restored the archive byte-for-byte; all 34 archived files retain their original SHA-256 values.
+  - Final receipt SHA-256: `5AC84E60C9A390036142553ACCC177E5EFBCFB04E97464A2D005D95DBB84DB8D`. See `artifacts/README.md` for the complete original-to-current/archive mapping and final source/artifact hashes.
+
+### Renamed maintained Phase 3 entry points with a consistent prefix
+- Summary: Renamed `implement_phase3.py`, `test_phase3.py`, and `analyze_phase3.ipynb` to `phase3_implement.py`, `phase3_test.py`, and `phase3_analyze.ipynb`, respectively. Updated Python imports/module commands, runtime provenance paths, notebook discovery/imports, tests, and current documentation links.
+- Affected files: `scripts/phase3_implement.py`, `scripts/phase3_test.py`, `scripts/phase3_analyze.ipynb`, `scripts/phase2_monitoring.py`, `scripts/test_phase2_monitoring.py`, `scripts/README.md`, `README.md`, `Distributed_Monitoring_POC_Project_Plan.md`, `Phase3A_Pivot_Plan.md`, `User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md`, `User Stories/US-3.34_organize_phase3_outputs_operational_and_archive.md`, `artifacts/README.md`, `CHANGELOG.md`.
+- Rationale and impact: Gives all three maintained Phase 3 entry points the requested `phase3_` filename format without changing their roles or scientific behavior. Python CLI/module invocation changes from `scripts.implement_phase3` / `scripts.test_phase3` to `scripts.phase3_implement` / `scripts.phase3_test`; external commands and links must use the new names.
+- Validation: Both renamed Python modules compiled and imported; `python -B -m scripts.phase3_test --record-validation artifacts\phase3_operational\phase3_validation.json` passed 166 tests with no skips/failures/errors; renamed production and saved/replay checks passed; the renamed analysis notebook executed successfully in a clean kernel. Regenerated the independent receipt (`190F120D134FB25F6FF98A66E3301004B6DC83663F054C686E49F8C4D5ADF538`) and production manifest for the renamed source paths. Existing scientific result and event CSV bytes are unchanged.
+
+### Consolidated Phase 3 artifacts under the approved phase3_ contract (US-3.33)
+- Summary:
+  - User approved a six-file schema-version-1 bundle after requiring every filename to start with phase3_: results, cluster sizes, snapshots, equivalence events, run metadata and independent validation.
+  - Combined the 3 control and 38 alpha-result records; combined all 246 cluster-size rows, preserving zero bins and explicit control alpha semantics. Kept compact selected snapshots distinct from complete C0 synchronization events.
+  - Combined comparison/completion/failure/equivalence metadata into phase3_run.json with explicit status/kind/version, artifact hashes, keys, schemas, record counts and scientific semantics. Independent validation remains a hash-referenced phase3_validation.json rather than an embedded duplicate.
+  - Updated production, runtime equivalence, saved verification, replay verification and the saved-only analysis notebook together. Old-format destinations fail without changes; failed/in-progress runs cannot certify leftover files.
+- Affected files:
+  - scripts/implement_phase3.py, scripts/test_phase3.py, scripts/analyze_phase3.ipynb
+  - README.md, scripts/README.md, artifacts/README.md
+  - User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md, .gitignore, CHANGELOG.md
+  - artifacts/phase3_artifacts_us333/ (ignored preserved pre-migration bundle, isolated candidate and verification evidence); artifacts/phase3_current/ (verified current bundle after cutover)
+- Rationale and impact:
+  - Reduces the current bundle from eleven files to six purpose-oriented, phase-prefixed files without changing algorithms, scientific results, precision, comparator identity, initialization accounting, independent validation or saved-only analysis.
+  - This is an approved current output schema/path change; old readers and receipts must not silently certify the new bundle. Historical root-level artifacts, PNGs, Phase 2 prerequisites and sealed migration/checkpoint evidence remain unchanged and separate.
+  - The immediately preceding eleven-file bundle is preserved in a hash-verified archive before migration; no duplicate legacy-format exports or additional maintained migration script are introduced.
+- Validation: outcomes and field/record preservation evidence are recorded with the story completion and the isolated artifacts/phase3_artifacts_us333/verified report.
+  - Passed 166 final-source tests, production/all six fresh-process replays and independent saved/replay checks. Verified every field of 41 result records and 246 size-bin records; 2,372 snapshot rows and 467 C0 event rows remained byte-identical CSVs. Scientific comparison/equivalence/diagnostic JSON and core scientific ASTs were preserved.
+  - Rejected eight deliberate corruptions, including changed scientific content with recomputed inventory hashes; real clean kernels passed five/eight-chart artist/table reconciliation and three expected missing/old-format/unsafe-export failures. Original references/current outputs/Phase 2 prerequisites and all 178 sealed checkpoint files retained their hashes during the gate.
+  - Published the exact proven six-file bundle to artifacts/phase3_current, preserving the previous eleven-file directory at artifacts/phase3_artifacts_us333/previous_current plus its ZIP/inventory. Current receipt provenance, active saved/replay checks and five-chart real-kernel analysis passed without changing published bytes.
+  - Initial Windows directory-rename publication failed after safely preserving the old current bundle. Retained failed evidence and switched only the transfer procedure to copying verified bytes into a new current directory, publishing phase3_run.json last; source/data/receipt hashes and scientific acceptance conditions were unchanged.
+
+### Verified and switched Phase 3 to the three-file workflow (US-3.32)
+- Summary:
+  - Removed retired notebook/facade dependencies from implementation, tests, validation receipts and provenance; added the canonical isolated `--equivalence` mode.
+  - Replaced the obsolete notebook architecture test with an exact three-file surface check and retained scientific regression coverage and independent cross-phase suites.
+  - Removed Phase 2's integrity-check dependency on the retired Phase 3 notebook. Added an explicit separate output directory for genuinely regenerated current Phase 2 prerequisites; current Phase 3 selects `artifacts/phase2_current` when present and rejects incomplete/stale references without falling back.
+  - Retirement is gated on an isolated final-source test/production/notebook run, exact full-matrix comparison, protected-file integrity and verified recovery archives. Original scientific artifacts and historical findings are not rewritten.
+- Affected files:
+  - scripts/implement_phase3.py, scripts/test_phase3.py
+  - scripts/phase2_monitoring.py, scripts/test_phase2_monitoring.py
+  - Retired scripts/build_phase3_temperature_clustering.ipynb, scripts/phase3a_protocol_equivalence.py, scripts/phase3a_us325.py, scripts/test_phase3_history.py, scripts/test_phase3_monitoring.py, scripts/test_phase3a_protocol_equivalence.py, scripts/test_phase3a_us325.py
+  - README.md, scripts/README.md, artifacts/README.md, Distributed_Monitoring_POC_Project_Plan.md
+  - User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md, .gitignore, CHANGELOG.md
+  - artifacts/phase3_cutover_us332/ and artifacts/phase2_current/ (ignored local execution/recovery evidence and freshly generated prerequisite)
+- Rationale and impact:
+  - Leaves exactly implementation, testing and analysis as maintained Phase 3 executable surfaces, without dropping independent Phase 1/2 checks or altering monitoring algorithms.
+  - Code/test hashes, integrity inventories, execution paths/run IDs, commands and removed notebook/facade provenance keys necessarily change. Historical root-level evidence stays immutable; fresh receipts and production are required for the final source.
+  - Existing scientific CSV names/schemas/precision and saved-only analysis remain unchanged. Artifact consolidation remains US-3.33 and requires separate approval.
+- Validation: final-source cutover evidence is recorded in artifacts/phase3_cutover_us332/verified/validation_report.json; see the story completion record for verified outcomes. The first comparison-harness attempt stopped because live tuples were compared to deserialized JSON arrays despite identical canonical fingerprints. Preserved that failure and corrected the harness to compare canonical JSON rows byte-for-byte; implementation/test sources and scientific comparison tolerances were unchanged.
+  - Passed 162 final-source tests, production/all six fresh-process replays, independent saved verification, exact full summaries/raw events/canonical decisions for 41 configurations (819,344 decisions; 16,210 initialization/root-sync events), six byte-identical scientific CSVs and fresh Phase 2 event bytes, clean-kernel five/eight-chart analysis/artist/table audits and three expected rejection cases.
+  - Verified all sealed baseline hashes and all 85 checkpoint ZIP members before retirement; preserved a hash-verified archive of the seven immediately preceding files. Twenty-eight Phase 3 scientific definitions and Phase 2 monitor definitions remain AST-identical.
+  - After retirement, active-checkout fresh Phase 2 prerequisites matched the proven candidate byte-for-byte; the actual external 162-test receipt matched active provenance and was copied without edits. Default production, independent saved/replay checks, missing-current-reference rejection and five-chart real-kernel analysis passed. artifacts/phase3_current is ready to use; original scientific/historical files remained unchanged.
+
+### Consolidated existing Phase 3 analysis into a saved-only notebook (US-3.31)
+- Summary:
+  - Created scripts/analyze_phase3.ipynb with existing source/moment methodology, hand calculations, protocol/accounting explanations, validation/C0/comparator context, matched tables, detailed interpretation, five revised charts, and limitations/deferred research gaps.
+  - Relocated revised plotting and the AST-identical detailed interpretation out of production; retained numeric comparisons/tables/minima/limits and all scientific CSV contracts. Added explicit versioned presentation metadata and empty automatic plot exports.
+  - Added an import-safe read-only analysis loader that validates saved schemas/accounting, source snapshots, run/completion/failure consistency, comparisons/minima, receipt integrity and current provenance without running monitors/tests/replays. Added analysis-isolation/presentation/receipt-separation regressions and wired loader verification into saved-output checks.
+  - Preserved three historical chart views as an opt-in section with their original signed-margin comparator; default charts remain inline and optional PNG exports require a new separate directory.
+- Affected files:
+  - scripts/analyze_phase3.ipynb
+  - scripts/implement_phase3.py
+  - scripts/phase3a_us325.py
+  - scripts/test_phase3.py
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/README.md
+  - artifacts/README.md
+  - User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md
+  - .gitignore
+  - CHANGELOG.md
+  - artifacts/phase3_analysis_us331/ (ignored local candidate, actual logs, clean-kernel notebooks, artist audits, checked optional exports, relocated source/procedure, and interrupted iteration evidence)
+- Rationale and impact:
+  - Makes existing scientific analysis readable in one executable saved-results narrative without new experiments, metrics, tuning, or expanded claims. Retains historical/revised/centralized denominators, prespecified alpha 0.10 versus in-sample minima, actual messages versus checks, and local-resolution versus avoided-synchronization distinctions.
+  - Revised production no longer generates five PNGs or detailed narrative. Comparison JSON uses presentation.schema_version=1 and an analysis-notebook pointer instead of the detailed interpretation payload; outputs.plots is empty and completion visualization metadata identifies saved-only analysis. Former private _plot_results/_interpretation facade exports are removed. Historical PNGs and explicit legacy-sweep behavior remain intact until cutover.
+  - Normal analysis preserves production/historical evidence and rejects missing/stale/mixed data rather than fabricating results. Analysis notebook output saves are intentionally not production-receipt dependencies; its exact source and execution are recorded separately. Original scientific files and sealed baseline are not overwritten.
+  - Installed missing nbclient/nbformat in the selected environment only after the clean-kernel dependency check failed; these are optional validation tools, not added production dependencies. Preserved the interrupted raw-notebook receipt-coupling iteration and validated final source afresh.
+- Validation:
+  - Canonical external suite: 159 tests passed, including four new analysis/presentation/isolation/receipt-separation checks. Pylance syntax checks passed for the implementation and testing modules.
+  - Isolated production passed three controls, 38 clustered configurations and six fresh-process replays without revised PNG/narrative generation. Independent saved-output verification also passed.
+  - Real clean kernels rendered five revised charts by default and eight with historical view/explicit export enabled. Actual Matplotlib line/stacked-area/bar values and displayed table values reconciled with saved rows; eight optional PNGs were verified.
+  - Missing outputs, stale provenance and unsafe export destinations failed explicitly. Instrumented kernels blocked monitor/production/replay calls and CSV writes, with no project testing modules imported. Analysis source/configuration/production/historical inputs remained unchanged.
+  - Six scientific CSVs reproduced byte-for-byte against the sealed baseline; 28 scientific definitions and the relocated interpretation remained AST-identical. Sealed checkpoint hashes and original-file integrity verified.
+
+### Consolidated Phase 3 testing and independent saved-output verification (US-3.30)
+- Summary:
+  - Relocated all maintained Phase 3 tests into scripts/test_phase3.py with explicit behavior/saved/replay selectors, executable coverage mapping, and compatibility-only former test modules. Preserved all 102 legacy cases, including inherited SMIC coverage and protocol defect injection.
+  - Added independent saved schemas, configuration grids, finite values, transmission/pathway/check/cluster-size reconciliation, source-derived truths, snapshot/moment/allowance checks, summary/table/minimum reconciliation, current provenance/receipt verification, and read-only C0/six weighted-control replay checks.
+  - Moved the external validation producer to the canonical test script. Schema-version-2 production receipts require actual complete behavioral/replay/external Phase 1/2 scope, test IDs/counts, zero skips/failures, unchanged protected files, and exact current input/code/configuration hashes.
+- Affected files:
+  - scripts/test_phase3.py
+  - scripts/test_phase3_history.py
+  - scripts/test_phase3_monitoring.py
+  - scripts/test_phase3a_protocol_equivalence.py
+  - scripts/test_phase3a_us325.py
+  - scripts/implement_phase3.py
+  - scripts/README.md
+  - artifacts/README.md
+  - User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md
+  - .gitignore
+  - CHANGELOG.md
+  - artifacts/phase3_testing_us330/ (ignored local candidate, verification reports/logs, coverage evidence, failed/interrupted attempts, and archived one-off procedure)
+- Rationale and impact:
+  - Establishes one authoritative testing entry point without trusting saved pass flags, rewriting results, or copying Phase 1 statistics-generation tests. Former module commands still forward to canonical coverage; production never imports or launches tests.
+  - Old receipts and saved validation metadata are intentionally stale for the new source revision and must be regenerated through real checks, not relabeled. Scientific algorithms, artifact basenames/schemas/precision/capture scope, historical references, and the sealed checkpoint remain unchanged.
+  - Fixed an observed skipped-test diagnostic serialization failure by recording test IDs/reasons rather than unittest objects. Retained the failed and interrupted attempts and validated final source from a fresh isolated copy.
+- Validation:
+  - Canonical external suite: 155 tests passed (107 behavioral/verifier cases, two replay checks, 42 Phase 2 tests, four Phase 1 statistics tests). Pylance syntax checks passed for the canonical testing and implementation modules.
+  - Unified production passed all three controls, 38 clustered configurations and six independent subprocess replays; the new current receipt was accepted and stale US-3.29 receipts rejected nonzero.
+  - Separate saved-output/replay verification passed all three checks with unchanged result bytes. Mutated summary counts, snapshots, missing configurations, and stale provenance failed; unit regressions additionally rejected malformed schemas, duplicates, nonfinite moments/numbers, incorrect shares/grids and unsafe report destinations. Missing saved outputs produced an explicit failed report.
+  - All six scientific CSVs reproduced byte-for-byte against the sealed baseline. Twenty-eight scientific definitions and ten of twelve legacy test classes remained AST-identical; the other two adapted receipt/provenance assertions only. Original code/configuration/artifact files remained unchanged during validation; sealed checkpoint hashes verified.
+
 ## 2026-11-10
+
+### Unified revised Phase 3 production execution (US-3.29)
+- Summary:
+  - Integrated runtime equivalence and US-3.25/3.26 orchestration into the canonical implementation; former runners are thin compatibility facades. Revised C0/C1/C2 plus 38 clustered configurations are the default, with the historical sweep explicitly selected.
+  - Added isolated output directories, current externally executed validation receipts, strict C0 cache provenance/event checks with genuine regeneration, read-only canonical subprocess replays, expanded protected-file checks, and durable current-run failure/completion records.
+  - Added orchestration/receipt regressions and a transitional external receipt-producing interface in the existing test module. Production no longer imports or automatically runs regression suites.
+- Affected files:
+  - scripts/implement_phase3.py
+  - scripts/phase3a_protocol_equivalence.py
+  - scripts/phase3a_us325.py
+  - scripts/test_phase3a_protocol_equivalence.py
+  - scripts/test_phase3a_us325.py
+  - scripts/README.md
+  - artifacts/README.md
+  - .gitignore
+  - User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md
+  - CHANGELOG.md
+  - artifacts/phase3_production_us329/ (local isolated validation evidence, including initial failure and successful verified run)
+- Rationale and impact:
+  - Establishes one authoritative revised production entry point without copying Phase 1/2 or changing scientific algorithms. Default outputs intentionally move to artifacts/phase3_current; artifact basenames, scientific schemas/precision, capture scope, plots, and narrative are preserved.
+  - Requires independently executed validation for the exact current source/inputs/configuration. Missing/stale receipts block evaluation; stale C0 evidence is regenerated in isolation rather than relabeled. Historical artifact roots and sealed evidence remain unchanged.
+  - Removed an unnecessary immediate second write of freshly generated C0 metadata after an observed Windows access-denied failure; retained that failed attempt and reran validation with final source and a fresh receipt.
+- Validation:
+  - External six-module suite: 148 tests passed. Unified production and all six independent fresh-process replays passed; current C0 cache reuse, genuine stale-C0 regeneration, and missing/stale receipt failures verified.
+  - All 41 complete summaries, 819,344 per-bucket decisions, and 16,210 initialization/synchronization events matched the sealed US-3.27 baseline exactly; six scientific CSVs reproduced byte-for-byte.
+  - Twenty-eight original scientific definitions remained AST-identical. All 63 candidate production-protected files and original source/configuration/artifact files remained unchanged during validation; sealed checkpoint hashes verified. Pylance syntax checks passed for the implementation and updated test module.
+
+### Extracted importable Phase 3 implementation (US-3.28)
+- Summary:
+  - Relocated 29 notebook definitions into one import-safe canonical module and replaced notebook implementation cells with imports. Retained the explicit historical sweep entry point and legacy Phase 2-scheduled regression helpers.
+  - Rewired all Phase 3 tests and transitional runners to ordinary imports; removed tagged-cell execution and synthetic-module loading.
+  - Added clean-process import/canonical-source checks and a negative-control provenance test; revised validation now requires the current implementation hash and rejects mismatched execution roots.
+- Affected files:
+  - scripts/implement_phase3.py
+  - scripts/build_phase3_temperature_clustering.ipynb
+  - scripts/phase3a_protocol_equivalence.py
+  - scripts/phase3a_us325.py
+  - scripts/test_phase3_history.py
+  - scripts/test_phase3_monitoring.py
+  - scripts/test_phase3a_protocol_equivalence.py
+  - scripts/test_phase3a_us325.py
+  - scripts/README.md
+  - artifacts/README.md
+  - .gitignore
+  - User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md
+  - CHANGELOG.md
+  - artifacts/phase3_extraction_us328/ (local isolated validation outputs/report/logs)
+- Rationale and impact:
+  - Removes notebook-state dependencies while retaining one authoritative implementation and all existing scientific behavior. Twenty-eight definitions remained AST-identical; only the historical sweep's notebook-path fallback and implementation-source provenance changed. Revised orchestration unification remains US-3.29 work.
+  - Implementation hashes are added to revised and historical sweep provenance; old reports are not silently re-certified. Original configuration/scientific artifacts and the sealed US-3.27 checkpoint were not overwritten.
+- Validation:
+  - Six-module regression suite: 141 tests passed, including import-safety and missing/stale implementation-hash rejection. Pylance syntax checks passed for the new implementation and updated integration tests.
+  - Isolated fresh equivalence command: 123 tests passed; revised production runner: 137 tests and all six fresh-process replays passed (overlapping suites).
+  - All 41 configurations exactly matched baseline summaries, raw events, and canonical decision traces (819,344 decisions; 16,210 initialization/synchronization events). Six scientific CSVs reproduced byte-for-byte.
+  - All historical notebook code cells executed successfully from a clean process; explicit module CLI help and whitespace checks passed.
+
+### Established recoverable Phase 3 pre-consolidation baseline (US-3.27)
+- Summary:
+  - Preserved 85 original source/configuration/documentation/artifact files, including required untracked sources, in a member-hash-verified archive with Git state, environment/package inventory, schemas, notebook tags, and provenance dependencies.
+  - Executed existing tests and the unchanged revised evaluation in an isolated copy; retained full observational evidence for C0/C1/C2 and all 38 clustered configurations.
+  - Added recovery/revalidation instructions, a story completion record, and a Git ignore rule for the generated checkpoint.
+- Affected files:
+  - .gitignore
+  - scripts/README.md
+  - artifacts/README.md
+  - User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md
+  - CHANGELOG.md
+  - artifacts/phase3_baseline_us327/ (local generated archive, isolated workspace, reports, logs, capture/verification procedures, and full-matrix evidence)
+- Rationale and impact:
+  - Creates a recoverable, independently verified reference before implementation relocation. No production code, notebook definitions, configuration, or original scientific artifacts changed; no files staged or committed.
+  - Found a pre-existing stale notebook hash in the original US-3.24 summary. Preserved the failed attempt and regenerated genuine equivalence evidence only in the isolated copy, with byte-identical scientific events; no gate or hash check was bypassed. The original summary remains stale and requires real revalidation before future production runs.
+- Validation:
+  - Existing six-module suite: 139 tests passed; fresh US-3.24 command: 122 tests passed; unchanged US-3.25 runner: 135 tests and six fresh-process replays passed (overlapping suites).
+  - Captured and independently hash/reconciliation-verified 41 configurations, 819,344 decisions, and 16,210 initialization/synchronization events.
+  - All 85 archive members verified. Five US-3.25 scientific CSVs plus US-3.24 equivalence events reproduced byte-for-byte; all 17 production protected artifacts remained unchanged during the revised evaluation.
+
+### Planned Phase 3 three-file workflow consolidation (US-3.27 through US-3.33)
+- Summary:
+  - Added one consolidated story document covering baseline preservation, implementation extraction, unified execution, test consolidation, existing-analysis consolidation, verified cutover, and subsequent artifact consolidation.
+- Affected files:
+  - User Stories/US-3.27_to_US-3.33_phase3_workflow_consolidation.md
+  - CHANGELOG.md
+- Rationale and impact:
+  - Defines a gated, recoverable migration to one implementation script, one testing script, and one analysis notebook. Separates script refactoring from artifact redesign and excludes new scientific analysis or algorithm changes. Planning documentation only; no code, experiments, or generated scientific outputs changed.
 
 ### Hardened US-3.25 validation, reproducibility, and reporting (US-3.26)
 - Summary:

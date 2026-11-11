@@ -7,10 +7,27 @@ This repository contains the temperature sensor transformation and monitoring wo
 - [AGENTS.md](AGENTS.md) — repository instructions and workflow rules for agents and contributors.
 - [instructions/README.md](instructions/README.md) — index for instruction-oriented documentation.
 - [Distributed_Monitoring_POC_Project_Plan.md](Distributed_Monitoring_POC_Project_Plan.md) — canonical project plan and implementation rules.
-- [scripts/README.md](scripts/README.md) — script usage and Phase 1/Phase 2 workflow notes.
-- [artifacts/README.md](artifacts/README.md) — generated artifact inventory and expectations.
+- [scripts/README_scripts.md](scripts/README_scripts.md) — script usage and Phase 1/Phase 2/Phase 3 workflow notes.
+- [artifacts/README_artifacts.md](artifacts/README_artifacts.md) — generated artifact inventory and expectations.
 
 ## Reporting output
+
+Phase 3 now has three maintained executable files:
+[implementation](scripts/phase3_implement.py),
+[independent testing](scripts/phase3_test.py), and
+[saved-results analysis](scripts/phase3_analyze.ipynb).
+See [current Phase 3 commands, prerequisites and rollback](scripts/README_scripts.md#us-334-phase3-output-and-operational-layout).
+Current Phase 3 results use the approved
+[`phase3_outputs` / `phase3_operational` layout](scripts/README_scripts.md#us-334-phase3-output-and-operational-layout):
+four user-readable result files are paired with a separate run manifest, complete
+C0 event evidence, and independent validation receipt. The removable
+`phase3_archive` contains only superseded Phase 3 material and is not required
+by any current workflow; the separately owned Phase 2 two-sided baseline and
+event files remain at the artifact root. See the US-3.34 removal proof and
+manual archival instructions.
+The original production notebook and compatibility modules were retired after
+full-matrix equivalence; historical artifacts and the recoverable checkpoint
+remain unchanged.
 
 CSV-first report artifacts are generated directly by the Phase 2 notebook run:
 
@@ -37,7 +54,7 @@ Validation distinguishes state-machine **consistency replay** (not independent
 proof), the offline **independent root-state correctness oracle** against
 centralized observations, and **synthetic regression tests** with independently
 specified fixtures, boundaries, hand counts, and injected defects.
-See [US-3.23 details](scripts/README.md#phase-2-two-sided-monitoring-us-323) for
+See [US-3.23 details](scripts/README_scripts.md#phase-2-two-sided-monitoring-us-323) for
 old/new event hashes, production metrics, full-suite commands, and provenance
 comparison scope. The reproducibility test compares complete deterministic
 summaries and byte-identical CSVs without rerunning the production dataset.
