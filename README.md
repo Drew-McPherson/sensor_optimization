@@ -22,19 +22,49 @@ Current Phase 3 results use the approved
 four user-readable result files are paired with a separate run manifest, complete
 C0 event evidence, and independent validation receipt. The removable
 `phase3_archive` contains only superseded Phase 3 material and is not required
-by any current workflow; the separately owned Phase 2 two-sided baseline and
-event files remain at the artifact root. See the US-3.34 removal proof and
+by any current workflow. The Phase 2 matched summary and events now use
+`phase2_outputs/` and `phase2_operational/` respectively. See the US-3.34 removal proof and
 manual archival instructions.
 The original production notebook and compatibility modules were retired after
 full-matrix equivalence; historical artifacts and the recoverable checkpoint
 remain unchanged.
 
-CSV-first report artifacts are generated directly by the Phase 2 notebook run:
+## Phase 2 current workflow (US-2.16)
 
-1. Run [scripts/run_phase2_notebook.py](scripts/run_phase2_notebook.py).
-2. Outputs are written to:
-3. [artifacts/phase2_data_dictionary.csv](artifacts/phase2_data_dictionary.csv)
-4. [artifacts/phase2_sensor_reduction_analysis.csv](artifacts/phase2_sensor_reduction_analysis.csv)
+The current Phase 2 experiment is the matched `phase3a_stable_cohort` run:
+six sensors (A/C/D/E/F/G), 19,984 one-minute buckets, and the authoritative
+cohort P90. Its saved baseline records 9,159 transmissions, 467
+synchronizations, and zero false-safe/false-violated root states. Run the
+implementation notebook, the isolated regression/saved-result test notebook,
+and the read-only saved-results analysis notebook as documented in
+[scripts/README_scripts.md](scripts/README_scripts.md#us-216-matched-phase-2-notebooks).
+The test notebook generates a separate receipt required by analysis and Phase 3.
+Both phases use the import-safe [shared monitoring engine](scripts/shared_monitoring_engine.py),
+which also handles Phase 2 artifact publication and receipt verification.
+The superseded Phase 2 files are preserved in `artifacts/phase2_archive/`.
+Phase 3 production has been regenerated using a current independent receipt.
+
+The local, Git-ignored [US-2.15 checkpoint](artifacts/phase2_baseline_us215/)
+preserves a SHA-256 inventory, exact source copies, and unrounded per-bucket
+behavior evidence. Its report records the pre-change Phase 2 test pass and the
+pre-existing Phase 3 saved-result validation failure; neither result is
+silently refreshed or hidden.
+
+US-2.19 verified all 19,984 unrounded bucket rows against that checkpoint and
+reran the current workflows in an isolated copy without the Phase 2 archive or
+retired paths. See the [verification and manual-removal details](scripts/README_scripts.md#us-219-final-equivalence-and-archive-independence).
+The checkpoint is separate from the removal queue and should be backed up
+before you move it outside the workspace.
+
+The general-dataset workflow is not part of the current path. Its notebook and
+runner are retained under `artifacts/phase2_archive/scripts/`; neither is needed
+by the matched notebooks or regression suite. They are preserved as historical
+files and must be restored to `scripts/` before using their original paths.
+No separate historical signed-margin
+notebook was identified; the signed-margin baseline is a retained JSON
+reference. Archived general-data artifacts and run logs have mixed-generation
+policy/threshold metadata and are not matched outputs; see the
+checkpoint inventory and lineage report.
 
 ## US-3.23 reproducibility and validation
 

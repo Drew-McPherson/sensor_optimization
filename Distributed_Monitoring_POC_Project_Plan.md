@@ -260,12 +260,15 @@ Implementation precedence rule for `event_resync_reason` when more than one caus
 Record every cause in `event_resync_causes`, including deferred membership events. Forced synchronization rows suppress local triggers. The legacy conditional `sensor_recovered_after_offline` path is replaced by detection of every departure/return.
 
 ### 6.7 Phase 2 Implementation Artifact
-Required implementation artifact:
-1. scripts/build_phase2_temperature_sensors.ipynb.
-2. scripts/phase2_monitoring.py, the state machine used by the notebook and synthetic tests.
+The current matched workflow uses `scripts/phase2_implement.ipynb` and the
+import-safe `scripts/shared_monitoring_engine.py`. The former general-dataset
+notebook is retained under `artifacts/phase2_archive/scripts/` for historical
+reference. The list below records the earlier implementation layout:
+1. scripts/build_phase2_temperature_sensors.ipynb (retired).
+2. scripts/shared_monitoring_engine.py, the state machine used by the notebook and synthetic tests.
 3. scripts/test_phase2_monitoring.py, run with `python -m unittest scripts.test_phase2_monitoring -v`.
 
-This is the existing general Phase 2 monitoring engine, updated by US-3.23 without removing its availability-aware behavior. Run `python -B -m scripts.phase2_monitoring` for the separately named revised matched baseline; it filters and validates the locked six-sensor cohort and interval and reads the Phase 3A-specific p90. No separate Phase 2 implementation or alternate monitoring state machine is required.
+This is the existing shared monitoring engine, updated by US-3.23 without removing its availability-aware behavior. Run `python -B -m scripts.shared_monitoring_engine publish` followed by `python -B -m scripts.shared_monitoring_engine validate` for the matched baseline and independent validation receipt. It filters and validates the locked six-sensor cohort and interval and reads the Phase 3A-specific p90. No alternate monitoring state machine is required.
 
 Notebook sections (cells):
 1. Load input artifacts and constants.

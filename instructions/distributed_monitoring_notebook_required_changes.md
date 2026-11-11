@@ -55,9 +55,10 @@ subtracting those costs as a no-availability-change counterfactual.
 
 ### Membership-aware Phase 2 policy (2026-10-21)
 
-The active notebook uses `scripts/phase2_monitoring.py` and implements the Phase 2
-slice of US-3.9 without clustering or additional run modes. These rules supersede
-older descriptions below where they differ:
+At the 2026-10-21 milestone, the notebook implemented the Phase 2 slice of
+US-3.9 without clustering or additional run modes. The current import-safe
+shared engine is `scripts/shared_monitoring_engine.py`; its later two-sided
+policy supersedes historical trigger rules in this section where they differ:
 
 1. Online/offline status is known without communication. Compare online sets each
    bucket; first missing/returning observations trigger synchronization.

@@ -41,6 +41,7 @@ artifacts/phase3_outputs/
 artifacts/phase3_operational/
 artifacts/phase3_archive/
 artifacts/phase2_current/
+artifacts/phase2_baseline_us215/
 artifacts/phase3_cutover_us332/
 artifacts/phase3_artifacts_us333/
 !artifacts/README.md
