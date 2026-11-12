@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import datetime as dt
+import statistics
+from types import ModuleType
+from typing import Any, Dict, List, Optional
 import hashlib
 import io
 import json
@@ -13,6 +18,267 @@ import tempfile
 import unittest
 
 import pandas as pd
+
+
+PHASE3A_APPROVED_SENSOR_IDS = ("A", "C", "D", "E", "F", "G")
+
+
+def _safe_numeric(v: Any) -> Optional[float]:
+    """Best-effort numeric conversion for mixed row values."""
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _percentile_linear(sorted_values: List[float], p: int) -> Optional[float]:
+    """
+    Compute percentile using linear interpolation between nearest ranks.
+    p is expected in [0, 100].
+    """
+    if not sorted_values:
+        return None
+    if p <= 0:
+        return sorted_values[0]
+    if p >= 100:
+        return sorted_values[-1]
+
+    n = len(sorted_values)
+    pos = (p / 100.0) * (n - 1)
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+
+    if lo == hi:
+        return sorted_values[lo]
+
+    weight = pos - lo
+    return sorted_values[lo] * (1.0 - weight) + sorted_values[hi] * weight
+
+
+def build_phase3a_average_values(
+    aligned_rows: List[Dict[str, Any]],
+    experiment_config: Dict[str, Any],
+) -> List[float]:
+    """Validate the interval and compute its fixed six-sensor means."""
+    sensor_ids = tuple(experiment_config.get("selected_sensor_ids", ()))
+    if sensor_ids != PHASE3A_APPROVED_SENSOR_IDS:
+        raise ValueError("Phase 3A cohort must remain exactly A, C, D, E, F, and G.")
+
+    sensor_columns = [f"{sensor_id}_temperature" for sensor_id in sensor_ids]
+    configured_columns = experiment_config.get("selected_sensor_temperature_columns")
+    if configured_columns != sensor_columns:
+        raise ValueError("Phase 3A sensor columns do not match the approved cohort.")
+    if experiment_config.get("endpoint_convention") != "inclusive":
+        raise ValueError("Phase 3A interval endpoints must both be inclusive.")
+
+    interval_seconds = experiment_config.get("sampling_interval_seconds")
+    expected_count = experiment_config.get("expected_bucket_count")
+    if (
+        interval_seconds != 60
+        or isinstance(expected_count, bool)
+        or not isinstance(expected_count, int)
+    ):
+        raise ValueError(
+            "Phase 3A requires an integer bucket count and 60-second interval."
+        )
+
+    start = dt.datetime.fromisoformat(experiment_config["start_timestamp_utc"])
+    end = dt.datetime.fromisoformat(experiment_config["end_timestamp_utc"])
+    if start.tzinfo is None or end.tzinfo is None:
+        raise ValueError("Phase 3A interval endpoints must be timezone-aware.")
+    start = start.astimezone(dt.timezone.utc)
+    end = end.astimezone(dt.timezone.utc)
+    elapsed_seconds = (end - start).total_seconds()
+    if elapsed_seconds <= 0 or elapsed_seconds % interval_seconds:
+        raise ValueError(
+            "Phase 3A endpoints must define a positive one-minute interval."
+        )
+    elapsed_minutes = int(elapsed_seconds // interval_seconds)
+    if expected_count != elapsed_minutes + 1:
+        raise ValueError("Phase 3A bucket count must include both interval endpoints.")
+    if experiment_config.get("expected_elapsed_minutes") != elapsed_minutes:
+        raise ValueError(
+            "Phase 3A expected elapsed minutes do not match its endpoints."
+        )
+
+    selected_rows = []
+    for row in aligned_rows:
+        timestamp = dt.datetime.fromisoformat(str(row["bucket_time_utc"]))
+        if timestamp.tzinfo is None:
+            raise ValueError("Phase 1 bucket timestamps must be timezone-aware.")
+        timestamp = timestamp.astimezone(dt.timezone.utc)
+        if start <= timestamp <= end:
+            selected_rows.append((row, timestamp))
+
+    if len(selected_rows) != expected_count:
+        raise ValueError(
+            f"Phase 3A requires {expected_count} aligned buckets; "
+            f"found {len(selected_rows)}."
+        )
+    timestamps = [timestamp for _, timestamp in selected_rows]
+    if len(set(timestamps)) != len(timestamps):
+        raise ValueError("Phase 3A aligned input contains duplicate timestamps.")
+    if any(left >= right for left, right in zip(timestamps, timestamps[1:])):
+        raise ValueError("Phase 3A aligned timestamps must be strictly increasing.")
+    if timestamps[0] != start or timestamps[-1] != end:
+        raise ValueError("Phase 3A aligned input does not include the exact endpoints.")
+
+    average_values = []
+    for index, (row, timestamp) in enumerate(selected_rows):
+        epoch = _safe_numeric(row.get("bucket_epoch"))
+        if epoch is None or not math.isfinite(epoch) or int(epoch) != epoch:
+            raise ValueError(
+                f"Phase 3A bucket_epoch is invalid at {timestamp.isoformat()}."
+            )
+        if int(epoch) != int(timestamp.timestamp()):
+            raise ValueError(
+                "Phase 3A bucket_epoch does not match " f"{timestamp.isoformat()}."
+            )
+        if (
+            index
+            and (timestamp - timestamps[index - 1]).total_seconds() != interval_seconds
+        ):
+            raise ValueError(
+                f"Phase 3A timestamp gap before {timestamp.isoformat()}; "
+                "expected exactly 60 seconds."
+            )
+
+        readings = []
+        for column in sensor_columns:
+            value = _safe_numeric(row.get(column))
+            if value is None or not math.isfinite(value):
+                raise ValueError(
+                    f"Phase 3A requires a finite {column} value at "
+                    f"{timestamp.isoformat()}."
+                )
+            readings.append(value)
+        average_values.append(sum(readings) / len(sensor_ids))
+
+    return average_values
+
+
+def build_phase3a_average_statistics_row(
+    average_values: List[float],
+    percentiles: List[int],
+) -> Dict[str, Any]:
+    """Build the Phase 3A statistics row, retaining full precision for P90."""
+    if not average_values or 90 not in percentiles:
+        raise ValueError("Phase 3A statistics require values and configured P90.")
+    if any(not math.isfinite(value) for value in average_values):
+        raise ValueError("Phase 3A average values must all be finite.")
+
+    sorted_values = sorted(average_values)
+    row: Dict[str, Any] = {
+        "series_name": "phase3a_stable_cohort",
+        "source_column": "phase3a_six_sensor_average",
+        "confidence_filter": "all_valid_phase3a_interval_buckets",
+        "filtered_snapshot_count": len(sorted_values),
+        "non_null_value_count": len(sorted_values),
+        "mean": round(statistics.mean(sorted_values), 6),
+        "std_dev": (
+            round(statistics.stdev(sorted_values), 6) if len(sorted_values) > 1 else 0.0
+        ),
+    }
+    for percentile in percentiles:
+        value = _percentile_linear(sorted_values, percentile)
+        if value is None:
+            row[f"p{percentile:02d}"] = ""
+        elif percentile == 90:
+            row[f"p{percentile:02d}"] = value
+        else:
+            row[f"p{percentile:02d}"] = round(value, 6)
+    return row
+
+
+
+def load_phase1_definitions(root: Path, *, audit: bool = False) -> ModuleType:
+    """Load only explicitly tagged definitions, never notebook execution cells."""
+    path = root.resolve() / "scripts" / "phase1_implement.ipynb"
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+    tag = "phase1-audit" if audit else "phase1-core"
+    cells = [cell for cell in notebook["cells"] if tag in cell.get("metadata", {}).get("tags", [])]
+    if len(cells) != 1 or cells[0]["cell_type"] != "code":
+        raise ValueError(f"Expected exactly one {tag} definition cell in {path}.")
+    module = ModuleType(tag.replace("-", "_"))
+    module.__file__ = str(path)
+    exec(compile("".join(cells[0]["source"]), str(path), "exec"), module.__dict__)
+    if audit:
+        module.discover_csv_files = module.discover_audit_csv_files
+    return module
+
+
+def validate_preparation_policy(config: dict) -> None:
+    threshold = config.get("threshold")
+    if not isinstance(threshold, dict) or any(threshold.get(key) != value for key, value in {
+        "source_series": "phase3a_stable_cohort", "statistic": "p90",
+        "production_script": "scripts/shared_monitoring_engine.py",
+        "status": "derived_from_aligned_input",
+    }.items()):
+        raise ValueError("Monitoring threshold policy must identify shared-engine cohort P90 preparation.")
+    if "p90_value" in threshold or "statistics_artifact" in threshold:
+        raise ValueError("Derived threshold values/statistics must be run evidence, not configuration.")
+
+
+def historical_input_matches(root: Path, historical: str, current: str) -> bool:
+    """Recognize the unchanged pre-cutover reference only for identical input bytes."""
+    if historical == current:
+        return True
+    return (
+        historical == "artifacts/aligned_phase1_temperature.csv"
+        and current == "artifacts/phase1_operational/phase1_aligned_temperature.csv"
+        and _hash(root / current) == "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b"
+    )
+
+
+def prepare_monitoring(root: Path) -> dict:
+    """Derive cohort statistics without writing configuration or artifacts."""
+    root = root.resolve()
+    config_path = root / "config" / "phase3a_experiment_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    validate_preparation_policy(config)
+    input_path = root / config["input_source"]
+    before = {"input_sha256": _hash(input_path), "config_sha256": _hash(config_path)}
+    status_path = root / "artifacts" / "phase1_operational" / "phase1_run.json"
+    if not status_path.is_file():
+        raise FileNotFoundError(f"Required Phase 1 publication status is missing: {status_path}")
+    publication = json.loads(status_path.read_text(encoding="utf-8"))
+    if (
+        publication.get("schema_version") != 1
+        or publication.get("limited_run") is not False
+        or publication.get("status") != "passed"
+        or publication.get("hashes", {}).get("phase1_aligned_sha256") != before["input_sha256"]
+        or publication.get("implementation_sha256") != _hash(root / "scripts" / "phase1_implement.ipynb")
+        or publication.get("config_sha256") != _hash(root / "config" / "transformation_defaults.yaml")
+    ):
+        raise ValueError("Phase 1 publication is failed, incomplete, or stale for the aligned input.")
+    with input_path.open(encoding="utf-8", newline="") as stream:
+        values = build_phase3a_average_values(list(csv.DictReader(stream)), config)
+    statistics_row = build_phase3a_average_statistics_row(values, list(range(5, 100, 5)))
+    if before != {"input_sha256": _hash(input_path), "config_sha256": _hash(config_path)}:
+        raise RuntimeError("Monitoring preparation inputs changed during execution.")
+    return {
+        "schema_version": 1, "source_series": "phase3a_stable_cohort",
+        "statistic": "p90", "p90_value": statistics_row["p90"],
+        "statistics": statistics_row,
+        "population": {key: config[key] for key in (
+            "input_source", "selected_sensor_ids", "selected_sensor_temperature_columns",
+            "start_timestamp_utc", "end_timestamp_utc", "endpoint_convention",
+            "expected_bucket_count", "expected_elapsed_minutes", "sampling_interval_seconds",
+        )},
+        "provenance": {**before, "producer_sha256": _hash(Path(__file__)),
+                       "publication_sha256": _hash(status_path)},
+    }
+
+
+def preparation_fingerprint(preparation: dict) -> str:
+    return hashlib.sha256(json.dumps(preparation, sort_keys=True, allow_nan=False, separators=(",", ":")).encode()).hexdigest()
+
+
+def validate_monitoring_preparation(root: Path, saved: dict) -> None:
+    if saved != prepare_monitoring(root):
+        raise ValueError("Saved monitoring preparation is stale or inconsistent with current inputs/code.")
 
 
 POLICY_ID = "two_sided_absolute_distance_equal_allowances"
@@ -374,20 +640,14 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
             "safe_when": "metric < threshold",
             "violated_when": "metric >= threshold",
         },
-        "input_source": "artifacts/aligned_phase1_temperature.csv",
+        "input_source": "artifacts/phase1_operational/phase1_aligned_temperature.csv",
     }
     for key, value in locked.items():
         if config.get(key) != value:
             raise ValueError(f"Phase 3A configuration does not match the approved {key}.")
+    preparation = prepare_monitoring(root)
     threshold_config = config["threshold"]
-    if (
-        threshold_config["source_series"] != "phase3a_stable_cohort"
-        or threshold_config["statistic"] != "p90"
-        or threshold_config["statistics_artifact"] != "artifacts/phase1_average_statistics.csv"
-    ):
-        raise ValueError("Phase 3A threshold provenance is not the approved cohort p90.")
     input_path = root / config["input_source"]
-    statistics_path = root / threshold_config["statistics_artifact"]
     historical_path = (
         artifacts / "phase3_operational" / "references" / "phase3a_phase2_baseline.json"
     )
@@ -409,7 +669,7 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
             raise ValueError("Phase 2 output directory overlaps protected checkpoint evidence.")
     output_path = destination / "phase3a_phase2_two_sided_baseline.json"
     events_path = destination / "phase3a_phase2_two_sided_events.csv"
-    protected = {input_path, statistics_path, config_path}
+    protected = {input_path, config_path}
     protected.add(historical_path)
     protected.update(path for path in artifacts.glob("phase2_*") if path.is_file())
     references = artifacts / "phase3_operational" / "references"
@@ -423,21 +683,17 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
         str(path.relative_to(root)): _sha256(path)
         for path in sorted(protected)
     }
-    statistics = pd.read_csv(statistics_path, float_precision="round_trip")
-    thresholds = statistics.loc[
-        statistics["series_name"].eq(threshold_config["source_series"]), "p90"
-    ]
-    if len(thresholds) != 1:
-        raise ValueError("Expected exactly one authoritative cohort p90 statistics row.")
-    threshold = float(thresholds.iloc[0])
-    if not math.isfinite(threshold) or threshold != float(threshold_config["p90_value"]):
-        raise ValueError("Statistics p90 does not match the full-precision configured threshold.")
+    threshold = preparation["p90_value"]
     historical = json.loads(historical_path.read_text(encoding="utf-8"))
     for key in (
         "experiment_name", "input_source", "selected_sensor_ids",
         "start_timestamp_utc", "end_timestamp_utc", "endpoint_convention", "boundary_convention",
     ):
-        if historical[key] != config[key]:
+        matches = (
+            historical_input_matches(root, historical[key], config[key])
+            if key == "input_source" else historical[key] == config[key]
+        )
+        if not matches:
             raise ValueError(f"Historical Phase 2 baseline does not match {key}.")
     if (
         historical["algorithm"] != "phase2"
@@ -514,7 +770,7 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
         "algorithm": "phase2",
         "threshold_policy": POLICY_ID,
         "threshold_source_series": threshold_config["source_series"],
-        "threshold_statistics_artifact": threshold_config["statistics_artifact"],
+        "monitoring_preparation": preparation,
         "threshold_statistic": "p90",
         "threshold_value": threshold,
         "bucket_count": len(trace),
@@ -544,7 +800,7 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
         },
         "provenance": {
             "input_sha256": protected_hashes[str(input_path.relative_to(root))],
-            "statistics_sha256": protected_hashes[str(statistics_path.relative_to(root))],
+            "preparation_sha256": preparation_fingerprint(preparation),
             "config_sha256": protected_hashes[str(config_path.relative_to(root))],
             "code_sha256": _sha256(Path(__file__)),
             "historical_baseline_sha256": _sha256(historical_path),
@@ -748,11 +1004,12 @@ EVENTS = Path("artifacts/phase2_operational/phase2_events.csv")
 RECEIPT = Path("artifacts/phase2_operational/phase2_validation.json")
 SOURCES = (
     "scripts/shared_monitoring_engine.py",
-    "scripts/test_phase2_monitoring.py",
-    "scripts/test_phase2_artifacts.py",
+    "scripts/test_shared_monitoring.py",
     "config/phase3a_experiment_config.json",
-    "artifacts/aligned_phase1_temperature.csv",
-    "artifacts/phase1_average_statistics.csv",
+    "artifacts/phase1_operational/phase1_aligned_temperature.csv",
+    "scripts/phase1_implement.ipynb",
+    "config/transformation_defaults.yaml",
+    "artifacts/phase1_operational/phase1_run.json",
     "artifacts/phase3_operational/references/phase3a_phase2_baseline.json",
 )
 
@@ -858,6 +1115,7 @@ def load_validated(root: Path) -> dict:
         or receipt.get("source_sha256") != _source_hashes(root)
     ):
         raise ValueError("Phase 2 independent validation receipt is failed, incomplete, or stale.")
+    validate_monitoring_preparation(root, summary.get("monitoring_preparation", {}))
     return summary
 
 
@@ -871,7 +1129,7 @@ def validate(root: Path) -> dict:
     summary_path, events_path = _owned_path(root, SUMMARY), _owned_path(root, EVENTS)
     summary_hash, events_hash = _hash(summary_path), _hash(events_path)
     suite = unittest.defaultTestLoader.loadTestsFromNames(
-        ["scripts.test_phase2_monitoring", "scripts.test_phase2_artifacts"]
+        ["scripts.test_shared_monitoring"]
     )
     stream = io.StringIO()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)

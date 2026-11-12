@@ -15,7 +15,7 @@ phase1:
   selected_sensors:
     - Temperature
   stale_threshold_seconds: 120
-  output_file: artifacts/aligned_phase1_temperature.csv
+  output_file: artifacts/phase1_operational/phase1_aligned_temperature.csv
 
 phase2:
   name: multivariate
@@ -67,9 +67,6 @@ summary_statistics:
     - 95
 
 artifacts:
-  raw_index: artifacts/raw_index.csv
-  phase1_aligned: artifacts/aligned_phase1_temperature.csv
-  phase1_average_statistics: artifacts/phase1_average_statistics.csv
+  raw_index: artifacts/phase1_operational/phase1_source_inventory.csv
+  phase1_aligned: artifacts/phase1_operational/phase1_aligned_temperature.csv
   phase2_aligned: artifacts/aligned_phase2_multivariate.csv
-  qc_report: artifacts/transformation_qc_report.csv
-  decisions_log: artifacts/transformation_decisions.md

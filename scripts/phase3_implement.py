@@ -33,6 +33,10 @@ from scripts.shared_monitoring_engine import (
     SUMMARY as PHASE2_SUMMARY,
     build_phase2_trace,
     load_validated as load_validated_phase2,
+    prepare_monitoring,
+    historical_input_matches,
+    preparation_fingerprint,
+    validate_preparation_policy,
     root_correctness_summary,
 )
 
@@ -333,7 +337,7 @@ def validate_phase3a_config(config):
     """Reject configuration drift from the approved stable-cohort contract."""
     if not isinstance(config, dict):
         raise ValueError("Phase 3A experiment configuration must be a JSON object.")
-    if config.get("input_source") != "artifacts/aligned_phase1_temperature.csv":
+    if config.get("input_source") != "artifacts/phase1_operational/phase1_aligned_temperature.csv":
         raise ValueError("Phase 3A input must use the aligned Phase 1 artifact.")
 
     sensor_ids = tuple(config.get("selected_sensor_ids", ()))
@@ -371,17 +375,14 @@ def validate_phase3a_config(config):
         raise ValueError("The Phase 3A threshold source must be phase3a_stable_cohort.")
     if threshold_config.get("statistic") != "p90":
         raise ValueError("The authoritative Phase 3A threshold statistic must be p90.")
-    threshold_value = threshold_config.get("p90_value")
-    if isinstance(threshold_value, bool) or not isinstance(
-        threshold_value, (int, float)
-    ) or not np.isfinite(threshold_value):
-        raise ValueError("The authoritative Phase 3A P90 must be a finite number.")
-    if threshold_config.get("status") != "authoritative":
-        raise ValueError("The Phase 3A P90 must be marked authoritative.")
-    if threshold_config.get("statistics_artifact") != "artifacts/phase1_average_statistics.csv":
-        raise ValueError("Phase 3A P90 provenance must name the Phase 1 statistics artifact.")
-    if threshold_config.get("production_script") != "scripts/build_phase1_temperature.py":
-        raise ValueError("Phase 3A P90 provenance must name the Phase 1 production script.")
+    if "p90_value" in threshold_config:
+        threshold_value = threshold_config["p90_value"]
+        if isinstance(threshold_value, bool) or not isinstance(threshold_value, (int, float)) or not np.isfinite(threshold_value):
+            raise ValueError("The resolved Phase 3A P90 must be a finite number.")
+        if threshold_config.get("status") != "authoritative" or threshold_config.get("production_script") != "scripts/shared_monitoring_engine.py":
+            raise ValueError("Resolved Phase 3A P90 must identify the shared monitoring engine.")
+    else:
+        validate_preparation_policy(config)
 
     start_time = pd.Timestamp(config.get("start_timestamp_utc"))
     end_time = pd.Timestamp(config.get("end_timestamp_utc"))
@@ -987,14 +988,10 @@ def load_phase3a_monitoring_inputs(root: Path) -> dict:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     sensors, _, _, _, _ = validate_phase3a_config(config)
     threshold_config = config["threshold"]
-    threshold = float(threshold_config["p90_value"])
-    statistics_path = root / threshold_config["statistics_artifact"]
-    statistics = pd.read_csv(statistics_path, float_precision="round_trip")
-    threshold_rows = statistics.loc[
-        statistics["series_name"] == threshold_config["source_series"], "p90"
-    ]
-    if len(threshold_rows) != 1 or float(threshold_rows.iloc[0]) != threshold:
-        raise ValueError("Phase 3A threshold does not match the authoritative statistics artifact.")
+    preparation = prepare_monitoring(root)
+    threshold = preparation["p90_value"]
+    threshold_config = {**threshold_config, "p90_value": threshold, "status": "authoritative"}
+    config = {**config, "threshold": threshold_config}
     input_path = root / config["input_source"]
     selected = prepare_phase3a_input(
         pd.read_csv(input_path, float_precision="round_trip"), config
@@ -1005,7 +1002,11 @@ def load_phase3a_monitoring_inputs(root: Path) -> dict:
         "experiment_name", "input_source", "selected_sensor_ids", "start_timestamp_utc",
         "end_timestamp_utc", "endpoint_convention", "boundary_convention",
     ):
-        if baseline[key] != config[key]:
+        matches = (
+            historical_input_matches(root, baseline[key], config[key])
+            if key == "input_source" else baseline[key] == config[key]
+        )
+        if not matches:
             raise ValueError(f"Phase 2 baseline does not match {key}.")
     if (
         baseline["bucket_count"] != len(selected)
@@ -1021,7 +1022,7 @@ def load_phase3a_monitoring_inputs(root: Path) -> dict:
         "threshold": threshold, "threshold_config": threshold_config,
         "selected": selected, "baseline": baseline,
         "config_path": config_path, "input_path": input_path,
-        "statistics_path": statistics_path,
+        "monitoring_preparation": preparation,
         "baseline_path": baseline_path,
     }
 
@@ -1075,7 +1076,7 @@ def run_phase3a_monitoring(
         "threshold_source_series": threshold_config["source_series"],
         "threshold_value": threshold,
         "threshold_statistic": threshold_config["statistic"],
-        "threshold_statistics_artifact": threshold_config["statistics_artifact"],
+        "monitoring_preparation": inputs["monitoring_preparation"],
         "phase2_total_messages": baseline["total_messages"],
         "phase2_resynchronizations": baseline["resynchronization_count"],
         "centralized_sensor_transmission_reference": len(selected) * len(sensors),
@@ -1193,7 +1194,7 @@ def run_phase3a_alpha_sweep(root: Path) -> dict:
     reference_dir = _phase3_reference_directory(root)
     implementation_path = Path(__file__).resolve()
     protected_paths = [
-        inputs["input_path"], inputs["statistics_path"], inputs["config_path"], inputs["baseline_path"],
+        inputs["input_path"], inputs["config_path"], inputs["baseline_path"],
         reference_dir / "phase3a_fmic_events.csv",
         reference_dir / "phase3a_fmic_summary.json",
         reference_dir / "phase3a_smic_events.csv",
@@ -2150,22 +2151,14 @@ def _validate_contract(root: Path):
             "safe_when": "metric < threshold",
             "violated_when": "metric >= threshold",
         },
-        "input_source": "artifacts/aligned_phase1_temperature.csv",
+        "input_source": "artifacts/phase1_operational/phase1_aligned_temperature.csv",
     }
     for key, value in expected.items():
         if config.get(key) != value:
             raise ValueError(f"Phase 3A configuration does not match approved {key}.")
-    threshold_config = config["threshold"]
-    if (
-        threshold_config.get("source_series") != EXPERIMENT_NAME
-        or threshold_config.get("statistic") != "p90"
-        or threshold_config.get("statistics_artifact")
-        != "artifacts/phase1_average_statistics.csv"
-    ):
-        raise ValueError("Phase 3A threshold provenance is not the authoritative cohort p90.")
+    preparation = prepare_monitoring(root)
 
     input_path = root / expected["input_source"]
-    stats_path = root / threshold_config["statistics_artifact"]
     revised_path = root / PHASE2_SUMMARY
     revised_events_path = root / PHASE2_EVENTS
     historical_path = reference_directory / "phase3a_phase2_baseline.json"
@@ -2174,17 +2167,11 @@ def _validate_contract(root: Path):
         raise ValueError("Phase 3 implementation must be imported from the selected root.")
     phase2_path = root / "scripts" / "shared_monitoring_engine.py"
     runner_path = Path(__file__).resolve()
-    for path in (input_path, stats_path, revised_path, revised_events_path, historical_path):
+    for path in (input_path, revised_path, revised_events_path, historical_path):
         if not path.is_file():
             raise FileNotFoundError(f"Required US-3.24 input is missing: {path}")
 
-    stats = pd.read_csv(stats_path, float_precision="round_trip")
-    p90 = stats.loc[stats["series_name"].eq(EXPERIMENT_NAME), "p90"]
-    if len(p90) != 1:
-        raise ValueError("Expected exactly one authoritative phase3a_stable_cohort p90.")
-    threshold = float(p90.iloc[0])
-    if not math.isfinite(threshold) or threshold != float(threshold_config["p90_value"]):
-        raise ValueError("Authoritative p90 differs from the locked config value.")
+    threshold = preparation["p90_value"]
 
     revised = load_validated_phase2(root)
     if (
@@ -2205,7 +2192,7 @@ def _validate_contract(root: Path):
     baseline_provenance = revised.get("provenance", {})
     expected_baseline_hashes = {
         "input_sha256": _sha256(input_path),
-        "statistics_sha256": _sha256(stats_path),
+        "preparation_sha256": preparation_fingerprint(preparation),
         "config_sha256": _sha256(config_path),
         "historical_baseline_sha256": _sha256(historical_path),
     }
@@ -2234,7 +2221,6 @@ def _validate_contract(root: Path):
     protected[revised_path] = _sha256(revised_path)
     protected[revised_events_path] = _sha256(revised_events_path)
     protected[input_path] = _sha256(input_path)
-    protected[stats_path] = _sha256(stats_path)
     protected[config_path] = _sha256(config_path)
     protected[implementation_path] = _sha256(implementation_path)
     protected[revised_path] = _sha256(revised_path)
@@ -2243,7 +2229,7 @@ def _validate_contract(root: Path):
         "config": config,
         "threshold": threshold,
         "input_path": input_path,
-        "stats_path": stats_path,
+        "monitoring_preparation": preparation,
         "phase2_path": phase2_path,
         "implementation_path": implementation_path,
         "runner_path": runner_path,
@@ -2481,8 +2467,8 @@ def run_phase3a_protocol_equivalence(
             "message_unit": "one actual transmission between distinct components",
         },
         "contract": {
-            "input": "artifacts/aligned_phase1_temperature.csv",
-            "statistics": "artifacts/phase1_average_statistics.csv",
+            "input": "artifacts/phase1_operational/phase1_aligned_temperature.csv",
+            "statistics": "artifacts/phase1_operational/phase1_run.json",
             "threshold_statistic": "phase3a_stable_cohort p90",
             "threshold_value": contract["threshold"],
             "start_timestamp_utc": contract["config"]["start_timestamp_utc"],
@@ -2538,7 +2524,7 @@ def run_phase3a_protocol_equivalence(
         ),
         "provenance": {
             "input_sha256": _sha256(contract["input_path"]),
-            "statistics_sha256": _sha256(contract["stats_path"]),
+            "preparation_sha256": preparation_fingerprint(contract["monitoring_preparation"]),
             "config_sha256": _sha256(root / "config" / "phase3a_experiment_config.json"),
             "phase2_monitoring_sha256": _sha256(contract["phase2_path"]),
             "phase3_implementation_sha256": _sha256(contract["implementation_path"]),
@@ -2754,7 +2740,7 @@ def _read_result_frames(directory: Path) -> dict[str, pd.DataFrame]:
 
 VALIDATION_TEST_MODULES = (
     "phase3_test.py",
-    "test_phase2_monitoring.py",
+    "test_shared_monitoring.py",
 )
 
 
@@ -2813,8 +2799,8 @@ def _failure_provenance(root: Path) -> dict[str, Any]:
     candidates = {
         "runner_sha256": Path(__file__).resolve(),
         "config_sha256": root / "config" / "phase3a_experiment_config.json",
-        "input_sha256": root / "artifacts" / "aligned_phase1_temperature.csv",
-        "statistics_sha256": root / "artifacts" / "phase1_average_statistics.csv",
+        "input_sha256": root / "artifacts" / "phase1_operational" / "phase1_aligned_temperature.csv",
+        "publication_sha256": root / "artifacts" / "phase1_operational" / "phase1_run.json",
         "historical_phase2_baseline_sha256": (
             _phase3_reference_directory(root) / "phase3a_phase2_baseline.json"
         ),
@@ -2918,10 +2904,10 @@ def validation_provenance(root: Path) -> dict[str, str]:
     """Files covered by an externally executed regression validation."""
     relative_paths = [
         "scripts/phase3_implement.py", "scripts/shared_monitoring_engine.py",
-        "scripts/build_phase1_temperature.py",
+        "scripts/phase1_implement.ipynb",
         "config/phase3a_experiment_config.json",
-        "artifacts/aligned_phase1_temperature.csv",
-        "artifacts/phase1_average_statistics.csv",
+        "artifacts/phase1_operational/phase1_aligned_temperature.csv",
+        "artifacts/phase1_operational/phase1_run.json",
         "artifacts/phase3_operational/references/phase3a_phase2_baseline.json",
         "artifacts/phase3_operational/references/phase3a_validation_summary.json",
         "artifacts/phase3_operational/references/phase3a_fmic_events.csv",
@@ -2938,7 +2924,6 @@ def validation_provenance(root: Path) -> dict[str, str]:
         "artifacts/phase3_operational/references/phase3a_comparison_summary.json",
     ]
     relative_paths.extend(f"scripts/{name}" for name in VALIDATION_TEST_MODULES)
-    relative_paths.append("scripts/test_phase1_phase3a_statistics.py")
     relative_paths.extend(path.as_posix() for path in (PHASE2_SUMMARY, PHASE2_EVENTS, PHASE2_RECEIPT))
     return {name: _sha256(root / name) for name in relative_paths}
 
@@ -2967,14 +2952,14 @@ def _validate_validation_record(root: Path, record: dict[str, Any]) -> None:
         or record.get("errors") != []
         or record.get("checks") != ["behavior", "replay"]
         or record.get("cross_phase_modules") != [
-            "scripts.test_phase2_monitoring", "scripts.test_phase1_phase3a_statistics"
+            "scripts.test_shared_monitoring"
         ]
         or not isinstance(count, int) or isinstance(count, bool) or count <= 0
         or not isinstance(record.get("test_ids"), list)
         or len(record["test_ids"]) != count
         or record.get("modules") != [
             f"scripts.{Path(name).stem}" for name in VALIDATION_TEST_MODULES
-        ] + ["scripts.test_phase1_phase3a_statistics"]
+        ]
         or record.get("provenance") != validation_provenance(root)
         or not record.get("command")
     ):
@@ -2984,7 +2969,7 @@ def _validate_validation_record(root: Path, record: dict[str, Any]) -> None:
 def _equivalence_provenance(root: Path, contract: dict[str, Any]) -> dict[str, Any]:
     return {
         "input_sha256": _sha256(contract["input_path"]),
-        "statistics_sha256": _sha256(contract["stats_path"]),
+        "preparation_sha256": preparation_fingerprint(contract["monitoring_preparation"]),
         "config_sha256": _sha256(root / "config" / "phase3a_experiment_config.json"),
         "phase2_monitoring_sha256": _sha256(contract["phase2_path"]),
         "phase3_implementation_sha256": _sha256(contract["implementation_path"]),
@@ -3892,7 +3877,7 @@ def load_phase3_analysis_results(
     expected = _equivalence_provenance(root, contract)
     provenance = report["provenance"]
     if any(provenance.get(key) != expected[key] for key in (
-        "input_sha256", "statistics_sha256", "config_sha256", "phase2_monitoring_sha256",
+        "input_sha256", "preparation_sha256", "config_sha256", "phase2_monitoring_sha256",
         "phase3_implementation_sha256", "runner_sha256",
         "revised_phase2_baseline_sha256", "test_sha256",
     )):
@@ -4696,6 +4681,7 @@ def _run_us325(
             "sensor_ids": list(sensor_ids),
             "bucket_count": len(frame),
             "threshold": contract["threshold"],
+            "monitoring_preparation": contract["monitoring_preparation"],
             "boundary_convention": contract["config"]["boundary_convention"],
             "alpha_grid": list(ALPHA_LABELS),
             "singleton_controls_alpha": "not_applicable",
@@ -4775,7 +4761,7 @@ def _run_us325(
         },
         "provenance": {
             "input_sha256": _sha256(contract["input_path"]),
-            "statistics_sha256": _sha256(contract["stats_path"]),
+            "preparation_sha256": preparation_fingerprint(contract["monitoring_preparation"]),
             "config_sha256": _sha256(root / "config" / "phase3a_experiment_config.json"),
             "phase2_monitoring_sha256": _sha256(contract["phase2_path"]),
             "phase3_implementation_sha256": _sha256(contract["implementation_path"]),

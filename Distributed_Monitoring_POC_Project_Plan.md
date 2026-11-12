@@ -6,6 +6,21 @@ Revision focus (2026-11-03): sponsor-approved Phase 3A stable-cohort pivot, matc
 
 ## 1) How To Read This Plan
 
+**Phase 1 ownership update (2026-11-11, US-1.16):**
+[`scripts/phase1_implement.ipynb`](scripts/phase1_implement.ipynb) is the
+canonical general transformation and optional duplicate-audit implementation.
+[`scripts/shared_monitoring_engine.py`](scripts/shared_monitoring_engine.py)
+now owns stable-cohort validation, mean/P90 preparation, and shared downstream
+freshness checks. Phase 1 neither requires nor mutates the monitoring
+configuration. The cohort P90 is derived run evidence embedded in Phase 2/3
+records, not a row written by Phase 1 or a numerical value stored in the
+experiment configuration. This ownership contract supersedes earlier
+statistics-row/producer wording below; experimental populations, full precision,
+and scientific algorithms remain unchanged. US-1.19 places current Phase 1
+data and run/validation records in `artifacts/phase1_operational/`; analysis
+remains saved/read-only. Historical artifact paths below are not current
+dependencies.
+
 **Execution architecture update (2026-11-11, US-3.32):** Phase 3 has exactly
 three maintained executable files: [`scripts/phase3_implement.py`](scripts/phase3_implement.py),
 [`scripts/phase3_test.py`](scripts/phase3_test.py), and
@@ -266,7 +281,7 @@ notebook is retained under `artifacts/phase2_archive/scripts/` for historical
 reference. The list below records the earlier implementation layout:
 1. scripts/build_phase2_temperature_sensors.ipynb (retired).
 2. scripts/shared_monitoring_engine.py, the state machine used by the notebook and synthetic tests.
-3. scripts/test_phase2_monitoring.py, run with `python -m unittest scripts.test_phase2_monitoring -v`.
+3. scripts/test_shared_monitoring.py, run with `python -m unittest scripts.test_shared_monitoring -v`.
 
 This is the existing shared monitoring engine, updated by US-3.23 without removing its availability-aware behavior. Run `python -B -m scripts.shared_monitoring_engine publish` followed by `python -B -m scripts.shared_monitoring_engine validate` for the matched baseline and independent validation receipt. It filters and validates the locked six-sensor cohort and interval and reads the Phase 3A-specific p90. No alternate monitoring state machine is required.
 

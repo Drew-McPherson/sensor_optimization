@@ -27,6 +27,7 @@ Data/
 scripts/Archive/
 
 # Generated pipeline outputs
+artifacts/phase1_archive/
 artifacts/*.csv
 artifacts/*.json
 artifacts/*.log

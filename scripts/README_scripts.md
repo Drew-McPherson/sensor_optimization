@@ -1,5 +1,121 @@
 # Transformation Script Usage
 
+## Phase 1 implementation (US-1.16)
+
+The canonical implementation is [`phase1_implement.ipynb`](phase1_implement.ipynb).
+Run all cells in a fresh kernel from the repository root or `scripts/`.
+Transformation definitions and optional duplicate-audit definitions are separated
+from execution using the unique `phase1-core` and `phase1-audit` cell tags.
+The shared engine's `load_phase1_definitions(root, audit=False)` loads definitions
+only; imports/definition loading do not run transformation or audits.
+
+- Production: leave `LIMIT_FILES = None`, `OUTPUT_DIR = None`; gates are enforced.
+- Smoke: choose a positive `LIMIT_FILES` and an explicit, separate `OUTPUT_DIR`.
+  Source, production, current output, archive and ancestor paths are rejected.
+- Duplicate investigation: set `RUN_DUPLICATE_AUDIT = True`, select the
+  aggregate-inclusive or source-only/reconciliation mode, and provide a new,
+  explicit `AUDIT_OUTPUT_DIR`. Audits are disabled in ordinary runs.
+- Testing: run [`phase1_test.ipynb`](phase1_test.ipynb) after Phase 1 production
+  and current Phase 2/3 receipts and outputs. The notebook runs source/audit
+  fixtures and the shared-monitoring suite, compares saved artifacts with
+  recorded US-1.15 scientific identities, and writes a separate test-owned receipt. The
+  monitoring-specific tests remain independently executable as `python -B -m
+  unittest scripts.test_shared_monitoring -v` and are also part of
+  Phase 3's independent validation.
+- Downstream order: Phase 1 implementation; Phase 2 implementation/test;
+  Phase 3 independent validation/production/saved checks; saved-only analysis.
+
+General statistics preserve the observed-only confidence-filtered series.
+Stable-cohort selection and full-precision P90 now belong to
+`shared_monitoring_engine.prepare_monitoring(root)`, which does not write
+configuration. Current Phase 2 summary and Phase 3 operational run records embed
+its input/configuration/producer/publication-bound evidence. Read-only consumers
+validate evidence and independent receipts rather than silently regenerate files.
+
+The canonical aligned CSV, source inventory and producer-owned `phase1_run.json`
+are in `artifacts/phase1_operational/`. The JSON consolidates producer status,
+settings, general statistics, QC, gates and companion hashes. A failed
+publication cannot leave a passing status for partial output; downstream rejects
+stale source, configuration or aligned-file identity. The old historical Phase 2
+reference retains its original path; the shared engine accepts that path only
+when the new aligned file has the recorded pre-cutover SHA-256.
+
+The former `build_phase1_temperature.py` and duplicate-audit script are preserved
+in `artifacts/phase1_archive/us116_retired_sources/`; no compatibility module is
+required. Original large duplicate outputs remain user-facing Phase 1 evidence.
+**The commands and producer/statistics-row references in the historical usage
+sections below describe retired paths unless explicitly identified as current.**
+
+## Phase 1 independent validation (US-1.17)
+
+Run all cells in [`phase1_test.ipynb`](phase1_test.ipynb) in a fresh kernel from
+the repository root or `scripts/`. Its fixture tests include both duplicate
+populations; they do not run the expensive full raw duplicate investigation.
+It checks input identities, output hashes and schemas, gate status, the complete
+unrounded matched Phase 2 trace, downstream scientific CSVs, current downstream
+receipts, and recorded US-1.15 scientific identities. Two fresh processes reproduce a small
+independent fixture; this is not a full raw-data production rerun.
+
+The notebook writes only `artifacts/phase1_operational/phase1_validation.json`,
+first marking it in progress and then passed or failed. The receipt contains
+the executed test IDs, hashes of tested files, the recorded baseline reference hash and the
+explicitly omitted exhaustive audit. It is separate from producer publication
+status and the Phase 2/3 receipts. A receipt is current only while its tested
+file hashes and recorded baseline reference match; rerun the notebook after any
+such change. The notebook does not read the archive; the reference hash identifies
+the original seal, while independent comparisons check actual scientific data.
+The two superseded Phase 1 test modules are recoverable in
+`phase1_archive/us117_retired_tests/`; their fixture classes are maintained in
+the notebook, not as duplicate active modules.
+
+## Phase 1 read-only analysis (US-1.18)
+
+Run [`phase1_analyze.ipynb`](phase1_analyze.ipynb) in a fresh kernel from the
+repository root or `scripts/`. It requires the retained
+`Data/files_csv/temperature_raw.csv`, existing Phase 1 user-facing duplicate
+and statistics evidence, current production status and its companion artifacts.
+The historical inputs are checked against recorded SHA-256 identities, while
+production files are checked against producer status. Missing or changed inputs
+fail explicitly; there is no raw-source fallback, archive fallback, or writing.
+If historical inputs are deliberately replaced, investigate lineage and update
+their documented identities before running this historical analysis.
+
+The original aggregate-based cadence/completeness plots, per-device counts,
+distributions, time series, descriptive statistics and credibility heuristic
+are preserved. Current source-only production QC and retained aggregate-inclusive
+and source-only duplicate summaries are separately labeled. Large conflict and
+unmatched files are linked, not loaded into dataframes; even linked evidence is
+hash-verified. The saved per-device key-statistics export has an unidentified
+exporter and is labeled accordingly. Archived source notebook bytes are under
+`artifacts/phase1_archive/us118_retired_sources/` for manual recovery only.
+
+## Phase 1 consolidation baseline (US-1.15)
+
+At US-1.15 capture, implementation and entry points were unchanged. The
+[recoverable baseline](../artifacts/README_artifacts.md#phase-1-recoverable-baseline-us-115)
+puts original bytes aside under `artifacts/phase1_archive/us115_baseline/`,
+with hashes, artifact ownership, analysis coverage, actual validation logs, and
+isolated scientific comparisons. The
+[US-1.15 through US-1.19 stories](../User%20Stories/US-1.15_to_US-1.19_phase1_workflow_and_artifact_consolidation.md)
+define the later migration; this baseline does not implement the new notebooks
+or move active artifacts.
+
+As found at US-1.15, `scripts/test_qc_phase1_duplicate_keys.py` imported a missing
+`scripts/qc_phase1_duplicate_keys.py`; the audit bytes were then at
+`artifacts/phase1_outputs/duplicate/qc_phase1_duplicate_keys.py`. The baseline
+records this failure and a separately labeled restored-path diagnostic, not a
+passing as-found duplicate suite. Existing documentation's old audit command is
+not currently runnable without resolving that path in the later consolidation.
+The historical `artifacts/phase1_run.log` also has aligned/QC hashes that do not
+match current files and must not be used as current-run certification.
+
+The full isolated Phase 1 rerun reproduced the aligned CSV, source inventory,
+statistics, and QC CSV exactly. The baseline also preserves a complete unrounded
+matched Phase 2 trace, fresh Phase 3 scientific reproduction, and execution of
+the existing analysis's 13 code cells and six charts. Actual command logs and
+the unresolved import failure are in the baseline report; no active producer,
+configuration, receipt, or analysis notebook was rewritten.
+
 ## Script
 - `scripts/build_phase1_temperature.py`
 
@@ -222,7 +338,7 @@ does not run tests, monitor data, or write project artifacts. The standard
 unittest suite can also be run from the repository root:
 
 ```powershell
-python -B -m unittest scripts.test_phase2_monitoring -q
+python -B -m unittest scripts.test_shared_monitoring -q
 ```
 
 The equivalent command-line publication and validation sequence is:
@@ -324,7 +440,7 @@ From the repository root:
 
 ```powershell
 python -B -m scripts.shared_monitoring_engine
-python -B -m unittest scripts.test_phase2_monitoring -q
+python -B -m unittest scripts.test_shared_monitoring -q
 python -B -m scripts.phase3_test --checks behavior
 ```
 
@@ -439,7 +555,7 @@ code cells on synthetic inputs, root-state defect injection in both directions,
 and protected-output checks. The fresh-process reproducibility check is automated:
 
 ```powershell
-python -B -m unittest scripts.test_phase2_monitoring.MatchedProductionTests.test_fresh_process_reproducibility_and_lf_events -v
+python -B -m unittest scripts.test_shared_monitoring.MatchedProductionTests.test_fresh_process_reproducibility_and_lf_events -v
 ```
 
 It invokes the existing matched-run CLI twice in separate Python subprocesses
@@ -662,7 +778,7 @@ availability costs by cause, not as an availability-free causal effect.
 Run from the repository root using the selected Python environment:
 
 ```powershell
-python -m unittest scripts.test_phase2_monitoring -v
+python -m unittest scripts.test_shared_monitoring -v
 ```
 
 Tests exercise startup, every departure/return, coinciding causes, next-row state,
@@ -977,7 +1093,7 @@ most `2.274e-13`.
 Tests:
 `python -B -m scripts.phase3_test --checks behavior`
 
-Phase 2's independent suite remains `python -B -m unittest scripts.test_phase2_monitoring -q`.
+The shared monitoring regression suite remains `python -B -m unittest scripts.test_shared_monitoring -q`.
 
 ### US-3.24 Phase 2 / Phase 3 protocol equivalence
 
@@ -1186,7 +1302,7 @@ and PyYAML 6.0.3; the full installed-package inventory is in the report.
 From the recovered root, using that environment, the validation sequence is:
 
 ```powershell
-python -B -m unittest scripts.phase3_testa_us325 scripts.test_phase2_monitoring scripts.phase3_test_history scripts.phase3_test_monitoring scripts.phase3_testa_protocol_equivalence scripts.test_phase1_phase3a_statistics -q
+python -B -m unittest scripts.phase3_testa_us325 scripts.test_shared_monitoring scripts.phase3_test_history scripts.phase3_test_monitoring scripts.phase3_testa_protocol_equivalence scripts.test_phase1_phase3a_statistics -q
 python -B -m scripts.phase3a_protocol_equivalence
 python -B -m scripts.phase3a_us325
 ```
@@ -1240,7 +1356,7 @@ as current. The following commands describe the archived US-3.28 validation
 procedure, not the current production interface:
 
 ```powershell
-python -B -m unittest scripts.phase3_testa_us325 scripts.test_phase2_monitoring scripts.phase3_test_history scripts.phase3_test_monitoring scripts.phase3_testa_protocol_equivalence scripts.test_phase1_phase3a_statistics -q
+python -B -m unittest scripts.phase3_testa_us325 scripts.test_shared_monitoring scripts.phase3_test_history scripts.phase3_test_monitoring scripts.phase3_testa_protocol_equivalence scripts.test_phase1_phase3a_statistics -q
 python -B -m scripts.phase3a_protocol_equivalence
 python -B -m scripts.phase3a_us325
 ```

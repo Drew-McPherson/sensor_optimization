@@ -10,7 +10,47 @@ This repository contains the temperature sensor transformation and monitoring wo
 - [scripts/README_scripts.md](scripts/README_scripts.md) — script usage and Phase 1/Phase 2/Phase 3 workflow notes.
 - [artifacts/README_artifacts.md](artifacts/README_artifacts.md) — generated artifact inventory and expectations.
 
-## Reporting output
+## Phase 1 implementation (US-1.16)
+
+Run [phase1_implement.ipynb](scripts/phase1_implement.ipynb) top-to-bottom from a
+fresh kernel, launched from the repository root or `scripts/`. It owns the
+general transformation and optional duplicate investigations. Definitions can
+be loaded without execution through the shared engine's
+`load_phase1_definitions(root, audit=False)` API. The old transformation script
+and misplaced duplicate-audit script are preserved under
+`artifacts/phase1_archive/us116_retired_sources/`, not maintained entry points.
+
+Phase 1 no longer reads or rewrites monitoring experiment configuration or
+publishes a monitoring-cohort statistics row. The shared engine derives the
+same full-precision cohort P90 from aligned data, verifies the successful Phase 1
+publication, and embeds preparation evidence in downstream run records. Run
+Phase 2 implementation and independent testing before Phase 3 validation and
+production. Phase 2/3 readers reject stale preparation and receipts.
+
+Production writes the aligned CSV, source inventory and consolidated run
+record in `artifacts/phase1_operational/`. The record includes producer status,
+settings, statistics, QC, gates and companion hashes. Limited runs require a
+separate explicit destination and cannot overwrite current production.
+See [Phase 1 usage](scripts/README_scripts.md#phase-1-implementation-us-116).
+
+## Phase 1 independent testing (US-1.17)
+
+After producing Phase 1 and current Phase 2/3 evidence, run
+[phase1_test.ipynb](scripts/phase1_test.ipynb) in a fresh kernel. It exercises
+independent fixture tests, verifies saved scientific evidence and creates a
+separate Phase 1 validation receipt in `phase1_operational/`. Recorded scientific
+baseline identities are checked without reading the recovery archive. The
+exhaustive raw duplicate investigation is not part of its default run.
+
+## Phase 1 analysis (US-1.18)
+
+[phase1_analyze.ipynb](scripts/phase1_analyze.ipynb) combines the existing raw
+temperature charts and tables with retained quality and duplicate findings.
+It reads the retained aggregate and saved evidence without rebuilding inputs
+or publishing artifacts. Historical aggregate-inclusive and source-only
+populations are explicitly distinguished.
+
+## Phase 3 reporting output
 
 Phase 3 now has three maintained executable files:
 [implementation](scripts/phase3_implement.py),
@@ -77,7 +117,7 @@ US-3.21/US-3.22 artifacts are preserved.
 Run the automated two-fresh-process synthetic regression from the repository root:
 
 ```powershell
-python -B -m unittest scripts.test_phase2_monitoring.MatchedProductionTests.test_fresh_process_reproducibility_and_lf_events -v
+python -B -m unittest scripts.test_shared_monitoring.MatchedProductionTests.test_fresh_process_reproducibility_and_lf_events -v
 ```
 
 Validation distinguishes state-machine **consistency replay** (not independent

@@ -59,6 +59,7 @@ from scripts.shared_monitoring_engine import (
     build_phase2_trace,
     evaluate_root_states,
     root_correctness_summary,
+    prepare_monitoring,
 )
 
 
@@ -233,7 +234,7 @@ class Phase3AExecutionTests(unittest.TestCase):
                 "statistic": "p90",
                 "p90_value": 100.0,
                 "status": "authoritative",
-                "production_script": "scripts/build_phase1_temperature.py",
+                "production_script": "scripts/shared_monitoring_engine.py",
             }
         )
         self.frame = self.build_frame(3)
@@ -408,8 +409,8 @@ class Phase3AExecutionTests(unittest.TestCase):
             "phase3a_stable_cohort",
         )
         self.assertEqual(PHASE3A_CONFIG["threshold"]["statistic"], "p90")
-        self.assertIsNotNone(PHASE3A_CONFIG["threshold"]["p90_value"])
-        self.assertEqual(PHASE3A_CONFIG["threshold"]["status"], "authoritative")
+        self.assertNotIn("p90_value", PHASE3A_CONFIG["threshold"])
+        self.assertEqual(PHASE3A_CONFIG["threshold"]["status"], "derived_from_aligned_input")
 
         modified = json.loads(json.dumps(self.config))
         modified["selected_sensor_ids"] = list("ABDEFG")
@@ -1038,20 +1039,29 @@ print("import-safe")
             config["end_timestamp_utc"] = times[-1].isoformat()
             config["expected_bucket_count"] = 3
             config["expected_elapsed_minutes"] = 2
-            config["threshold"]["p90_value"] = 1.0
             (root / "config" / "phase3a_experiment_config.json").write_text(json.dumps(config))
             frame = pd.DataFrame({
                 "bucket_epoch": [int(time.timestamp()) for time in times],
                 "bucket_time_utc": [time.isoformat() for time in times],
                 **{f"{sensor}_temperature": [0.0, 0.1, 2.0] for sensor in config["selected_sensor_ids"]},
             })
+            (root / config["input_source"]).parent.mkdir(parents=True, exist_ok=True)
             frame.to_csv(root / config["input_source"], index=False)
-            pd.DataFrame([{"series_name": "phase3a_stable_cohort", "p90": 1.0}]).to_csv(
-                root / config["threshold"]["statistics_artifact"], index=False
-            )
+            publication = root / "artifacts" / "phase1_operational" / "phase1_run.json"
+            publication.parent.mkdir(parents=True, exist_ok=True)
+            (root / "scripts").mkdir()
+            for relative in ("scripts/phase1_implement.ipynb", "config/transformation_defaults.yaml"):
+                (root / relative).write_bytes((Path(__file__).resolve().parents[1] / relative).read_bytes())
+            publication.write_text(json.dumps({
+                "schema_version": 1, "limited_run": False, "status": "passed", "hashes": {
+                    "phase1_aligned_sha256": hashlib.sha256((root / config["input_source"]).read_bytes()).hexdigest(),
+                },
+                "implementation_sha256": hashlib.sha256((root / "scripts" / "phase1_implement.ipynb").read_bytes()).hexdigest(),
+                "config_sha256": hashlib.sha256((root / "config" / "transformation_defaults.yaml").read_bytes()).hexdigest(),
+            }))
             baseline.update({
                 "end_timestamp_utc": config["end_timestamp_utc"], "bucket_count": 3,
-                "threshold_value": 1.0, "global_violation_count": 1,
+                "threshold_value": 0.1 * (1 - 0.8) + 2.0 * 0.8, "global_violation_count": 1,
             })
             baseline_path = references / "phase3a_phase2_baseline.json"
             baseline_path.write_text(json.dumps(baseline))
@@ -1071,8 +1081,7 @@ print("import-safe")
             self.assertEqual(
                 {path.name for path in (root / "artifacts").iterdir()},
                 {
-                    "aligned_phase1_temperature.csv",
-                    "phase1_average_statistics.csv",
+                    "phase1_operational",
                     "phase3_operational",
                 },
             )
@@ -1108,8 +1117,7 @@ print("import-safe")
             self.assertEqual(
                 {path.name for path in (root / "artifacts").iterdir()},
                 {
-                    "aligned_phase1_temperature.csv",
-                    "phase1_average_statistics.csv",
+                    "phase1_operational",
                     "phase3_operational",
                 },
             )
@@ -1194,12 +1202,10 @@ print("import-safe")
             with self.assertRaisesRegex(ValueError, "Invalid matched Phase 2"):
                 run_phase3a_smic(root)
             baseline_path.write_bytes(original)
-            pd.DataFrame([{"series_name": "phase3a_stable_cohort", "p90": 2.0}]).to_csv(
-                root / config["threshold"]["statistics_artifact"], index=False
-            )
-            with self.assertRaisesRegex(ValueError, "authoritative statistics"):
+            publication.write_text('{"status":"failed"}')
+            with self.assertRaisesRegex(ValueError, "publication"):
                 run_phase3a_fmic(root)
-            with self.assertRaisesRegex(ValueError, "authoritative statistics"):
+            with self.assertRaisesRegex(ValueError, "publication"):
                 run_phase3a_smic(root)
 
     def test_fmic_synthetic_protocol_matches_pre_smic_fingerprint(self):
@@ -1714,7 +1720,7 @@ class ProductionReproducibilityTests(unittest.TestCase):
                 self.assertEqual(
                     set(summary["provenance"]["test_sha256"]),
                     {
-                        "test_phase2_monitoring.py",
+                        "test_shared_monitoring.py",
                         "phase3_test.py",
                     },
                 )
@@ -1888,15 +1894,13 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         modules = [
             f"scripts.{Path(name).stem}" for name in implementation.VALIDATION_TEST_MODULES
-        ] + ["scripts.test_phase1_phase3a_statistics"]
+        ]
         record = {
             "schema_version": 2, "status": "passed", "returncode": 0,
             "protected_files_unchanged": True, "skipped": [], "failures": [], "errors": [],
             "test_ids": ["independently_executed_test"],
             "checks": ["behavior", "replay"],
-            "cross_phase_modules": [
-                "scripts.test_phase2_monitoring", "scripts.test_phase1_phase3a_statistics"
-            ],
+            "cross_phase_modules": ["scripts.test_shared_monitoring"],
             "test_count": 1, "inputs_and_code_unchanged": True, "modules": modules,
             "command": ["independently_executed_tests"], "provenance": {"code": "current"},
         }
@@ -2499,7 +2503,7 @@ REPLAY_SPECS = (
 
 
 CROSS_PHASE_MODULES = [
-    "scripts.test_phase2_monitoring", "scripts.test_phase1_phase3a_statistics",
+    "scripts.test_shared_monitoring",
 ]
 
 
@@ -2769,7 +2773,7 @@ def _verify_saved_provenance(directory, report):
     expected = implementation._equivalence_provenance(ROOT, contract)
     provenance = report["provenance"]
     for field in (
-        "input_sha256", "statistics_sha256", "config_sha256", "phase2_monitoring_sha256",
+        "input_sha256", "preparation_sha256", "config_sha256", "phase2_monitoring_sha256",
         "phase3_implementation_sha256", "runner_sha256",
         "revised_phase2_baseline_sha256", "test_sha256",
     ):
@@ -3367,9 +3371,9 @@ class SavedOutputValidationTests(unittest.TestCase):
 
     def test_full_precision_threshold_is_consumed_without_rounding(self):
         config = json.loads((ROOT / "config" / "phase3a_experiment_config.json").read_text())
-        stats = pd.read_csv(ROOT / config["threshold"]["statistics_artifact"], float_precision="round_trip")
-        threshold = float(stats.loc[stats.series_name.eq("phase3a_stable_cohort"), "p90"].item())
-        self.assertEqual(threshold, config["threshold"]["p90_value"])
+        preparation = prepare_monitoring(ROOT)
+        threshold = preparation["p90_value"]
+        self.assertEqual(threshold, 22.428666649999997)
         self.assertNotEqual(threshold, round(threshold, 8))
         monitor = FMICMonitor(("A", "B"), threshold, 0.1)
         self.assertEqual(monitor.threshold, threshold)
