@@ -10,6 +10,56 @@ This repository contains the temperature sensor transformation and monitoring wo
 - [scripts/README_scripts.md](scripts/README_scripts.md) — script usage and Phase 1/Phase 2/Phase 3 workflow notes.
 - [artifacts/README_artifacts.md](artifacts/README_artifacts.md) — generated artifact inventory and expectations.
 
+## Python environment setup
+
+Install Python and VS Code, and make the repository available locally. Create a
+separate virtual environment on each computer, outside Dropbox or other synced
+folders: virtual environments contain machine-specific paths and should not be
+synced between computers.
+
+In PowerShell, replace the example paths with your repository and local
+environment paths, then run:
+
+```powershell
+$RepoPath = 'C:\Projects\sensor_project'
+$VenvPath = 'C:\venvs\sensor_project'
+Set-Location -LiteralPath $RepoPath
+python -m venv $VenvPath
+& "$VenvPath\Scripts\Activate.ps1"
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+In VS Code, use **Python: Select Interpreter** to select
+`<venv-path>\Scripts\python.exe`, then select the same environment in the
+notebook kernel picker. Install notebook support if VS Code prompts for it.
+Verify the interpreter and dependencies in a notebook cell:
+
+```python
+import sys
+print(sys.executable)
+import numpy, pandas
+print("Environment OK")
+```
+
+The printed executable should be the Python in the local environment. For
+current notebook and script commands, prerequisites, and workflow order, see
+[script usage](scripts/README_scripts.md).
+
+For subsequent sessions, open a terminal in the repository and activate that
+computer's environment again with `& "<venv-path>\Scripts\Activate.ps1"`.
+If activation is blocked by PowerShell policy, run
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` in that terminal,
+then activate again. If `python` is not recognized, install Python and restart
+VS Code; if imports fail, check `python -c "import sys; print(sys.executable)"`
+and ensure dependencies were installed into that interpreter.
+
+If VS Code settings force the old repository `.venv` interpreter, remove that
+setting and select the local interpreter. Delete an old synced `.venv` only
+after each computer is working with its own local environment. For a
+single-computer workflow, an in-repository `.venv` is also an option; keep it
+ignored by Git.
+
 ## Phase 1 implementation (US-1.16)
 
 Run [phase1_implement.ipynb](scripts/phase1_implement.ipynb) top-to-bottom from a
@@ -131,9 +181,8 @@ summaries and byte-identical CSVs without rerunning the production dataset.
 
 ## Instruction documents
 
-Instruction-style documentation now lives under [instructions](instructions):
+Additional instruction-style documentation lives under [instructions](instructions):
 
-- [instructions/PYTHON_ENV_SETUP_GUIDE.md](instructions/PYTHON_ENV_SETUP_GUIDE.md)
 - [instructions/distributed_monitoring_notebook_required_changes.md](instructions/distributed_monitoring_notebook_required_changes.md)
 
 ## Archive note

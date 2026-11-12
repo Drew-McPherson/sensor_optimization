@@ -19,6 +19,9 @@ Archive/
 *.pdf
 *.docx
 
+# User-authored planning material stays local
+User Stories/
+
 # Raw input data stays outside the source-only repo
 Data/files_csv/
 Data/

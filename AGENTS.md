@@ -2,15 +2,26 @@
 
 ## Mandatory Change Logging
 
-For every requested change that modifies code, notebooks, scripts, configuration, or documentation:
+For every requested change that modifies code, notebooks, scripts, configuration, or documentation, update `CHANGELOG.md` in the same task using this format:
 
-1. Update `CHANGELOG.md` in the same task.
-2. Add a dated entry with:
-   - summary of what changed,
-   - affected files,
-   - rationale and any behavior/output impact.
-3. Treat changelog update as part of definition of done.
-4. In the final response, include a short confirmation that changelog was updated.
+```md
+## YYYY-MM-DD
+
+### Descriptive change title
+- **Context / trigger:** What problem, finding, constraint, or new requirement prompted the work?
+- **Decision / change:** What was decided or implemented? For a pivot, what direction changed?
+- **Rationale:** Why was this approach chosen? Include alternatives or trade-offs only when they were actually considered.
+- **Outcome / impact:** What changed for behavior, outputs, workflow, or project direction? Note what stayed the same.
+- **Evidence / validation:** What tests, comparisons, or other evidence support the result? If validation was not run or was not recorded, state that explicitly; do not imply it passed.
+- **Affected files / artifacts:** List the relevant source, documentation, and generated artifact paths.
+- **Related work:** Link relevant user stories, plans, prior decisions, or follow-up work when useful.
+```
+
+Use one ISO-date heading (`YYYY-MM-DD`) per day, with that day's entries immediately beneath it; place the newest date first. Use descriptive, unnumbered entry titles. Keep the fields in the order shown; include every field except Related work, which is optional. Be concise for routine changes and explain context, rationale, and before/after direction more fully for significant changes or pivots.
+
+Record only facts supported by the request, implementation, or validation evidence. Do not invent historical context, alternatives, outcomes, or validation. For historical entries, state when information was not recorded in the source rather than inferring it. Preserve meaningful details about behavior, outputs, decisions, and affected files when editing existing entries.
+
+Treat the changelog update as part of the definition of done. In the final response, include a short confirmation that it was updated.
 
 ## No-Skip Rule
 
