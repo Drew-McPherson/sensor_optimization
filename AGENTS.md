@@ -1,5 +1,14 @@
 # Agent Working Agreement
 
+## Canonical project configuration
+
+`config/project_config.yaml` is the single canonical configuration file for
+project runtime and experiment settings. Update or extend its existing sections
+when configuration changes are needed; do not introduce another project
+configuration file. Keep dependency and tool manifests (such as
+`requirements.txt`) separate. If a distinct project configuration file appears
+necessary, explain the constraint and get user approval before adding it.
+
 ## Mandatory Change Logging
 
 For every requested change that modifies code, notebooks, scripts, configuration, or documentation, update `CHANGELOG.md` in the same task using this format:

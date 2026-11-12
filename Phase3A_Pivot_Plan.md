@@ -454,7 +454,7 @@ The normal Phase 3A deliverable set should remain small.
 
 Target artifacts are:
 
-1. `phase3a_experiment_config.json`
+1. The `phase3a_experiment` section of `config/project_config.yaml`
 2. `phase3a_cluster_events.csv`
 3. `phase3a_results.csv`
 4. Phase 3A synthetic/unit-test results

@@ -519,7 +519,7 @@ No Phase 3B gate blocks Phase 3A completion. Phase 3B begins only after separate
 3. Row count is 19,984.
 4. Complete observations are verified for all six sensors on every row.
 5. Phase 3A p90 is calculated from this exact population and added to `phase1_average_statistics.csv` without overwriting existing statistics.
-6. A minimal `phase3a_experiment_config.json` or equivalent records the locked cohort, interval, expected row count, and threshold source.
+6. The `phase3a_experiment` section of `config/project_config.yaml` records the locked cohort, interval, expected row count, and threshold source.
 
 ### 9.3 Matched Phase 2 Baseline
 1. Existing Phase 2 code is reused.
@@ -612,7 +612,7 @@ No availability sensitivity or attribution run is required for Phase 3A. If Phas
 Target Phase 3A artifacts are intentionally small:
 1. existing `artifacts/aligned_phase1_temperature.csv`;
 2. existing `artifacts/phase1_average_statistics.csv` plus the new Phase 3A statistics row;
-3. `phase3a_experiment_config.json` or equivalent minimal config;
+3. The Phase 3A experiment settings in `config/project_config.yaml`;
 4. matched stable-cohort Phase 2 result artifact;
 5. **Completed FMIC artifacts:** `phase3a_fmic_events.csv` and `phase3a_fmic_summary.json`;
 6. **Completed SMIC artifacts:** `phase3a_smic_events.csv` and `phase3a_smic_summary.json`;
