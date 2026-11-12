@@ -1,0 +1,154 @@
+{
+  "qc": {
+    "files_processed": 3471,
+    "rows_total": 79274744,
+    "rows_schema_valid": 79274744,
+    "rows_schema_invalid": 0,
+    "rows_temperature": 9909343,
+    "rows_temperature_valid": 9899253,
+    "rows_temperature_invalid": 0,
+    "rows_temperature_duplicate": 10090,
+    "devices_seen_count": 8,
+    "snapshot_count": 218148,
+    "schema_validity_percent": 100.0,
+    "duplicate_key_rate_percent": 0.101823,
+    "stale_snapshot_rate_percent": 0.971359,
+    "device_coverage_percent": 99.028641,
+    "excluded_non_source_csv_filenames": [
+      "temperature_raw.csv"
+    ]
+  },
+  "all_quality_gates_passed": true,
+  "gate_checks": [
+    {
+      "gate": "schema_validity_min_percent",
+      "metric": "schema_validity_percent",
+      "operator": ">=",
+      "actual": 100.0,
+      "threshold": 100.0,
+      "passed": true
+    },
+    {
+      "gate": "duplicate_key_rate_max_percent",
+      "metric": "duplicate_key_rate_percent",
+      "operator": "<=",
+      "actual": 0.101823,
+      "threshold": 0.5,
+      "passed": true
+    },
+    {
+      "gate": "stale_snapshot_rate_max_percent",
+      "metric": "stale_snapshot_rate_percent",
+      "operator": "<=",
+      "actual": 0.971359,
+      "threshold": 10.0,
+      "passed": true
+    },
+    {
+      "gate": "device_coverage_min_percent",
+      "metric": "device_coverage_percent",
+      "operator": ">=",
+      "actual": 99.028641,
+      "threshold": 90.0,
+      "passed": true
+    }
+  ],
+  "before_sha256": "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b",
+  "after_sha256": "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b",
+  "columns_unchanged": true,
+  "before_rows": 218148,
+  "after_rows": 218148,
+  "timestamps_added": 0,
+  "timestamps_removed": 0,
+  "timestamp_labels_changed_on_common_epochs": 0,
+  "timestamp_order_unchanged": true,
+  "availability_cells_changed": 0,
+  "availability_rows_changed": 0,
+  "metadata_cells_changed": {
+    "available_devices": 0,
+    "max_age_seconds": 0,
+    "snapshot_confidence": 0,
+    "meets_min_device_coverage": 0,
+    "average_temperature_all_devices_count": 0
+  },
+  "sensor_temperature_cells_compared": 1626090,
+  "sensor_temperature_cells_changed": 0,
+  "sensor_temperature_rows_changed": 0,
+  "sensor_max_absolute_difference": 0,
+  "sensor_mean_absolute_difference_changed": 0,
+  "per_sensor_value_changes": {
+    "A_temperature": {
+      "comparable_cells": 215842,
+      "changed_cells": 0,
+      "max_absolute_difference": 0,
+      "mean_absolute_difference_changed": 0,
+      "mean_absolute_difference_all_comparable": 0.0
+    },
+    "B_temperature": {
+      "comparable_cells": 199529,
+      "changed_cells": 0,
+      "max_absolute_difference": 0,
+      "mean_absolute_difference_changed": 0,
+      "mean_absolute_difference_all_comparable": 0.0
+    },
+    "C_temperature": {
+      "comparable_cells": 217476,
+      "changed_cells": 0,
+      "max_absolute_difference": 0,
+      "mean_absolute_difference_changed": 0,
+      "mean_absolute_difference_all_comparable": 0.0
+    },
+    "D_temperature": {
+      "comparable_cells": 218141,
+      "changed_cells": 0,
+      "max_absolute_difference": 0,
+      "mean_absolute_difference_changed": 0,
+      "mean_absolute_difference_all_comparable": 0.0
+    },
+    "E_temperature": {
+      "comparable_cells": 218128,
+      "changed_cells": 0,
+      "max_absolute_difference": 0,
+      "mean_absolute_difference_changed": 0,
+      "mean_absolute_difference_all_comparable": 0.0
+    },
+    "F_temperature": {
+      "comparable_cells": 210258,
+      "changed_cells": 0,
+      "max_absolute_difference": 0,
+      "mean_absolute_difference_changed": 0,
+      "mean_absolute_difference_all_comparable": 0.0
+    },
+    "G_temperature": {
+      "comparable_cells": 207848,
+      "changed_cells": 0,
+      "max_absolute_difference": 0,
+      "mean_absolute_difference_changed": 0,
+      "mean_absolute_difference_all_comparable": 0.0
+    },
+    "H_temperature": {
+      "comparable_cells": 138868,
+      "changed_cells": 0,
+      "max_absolute_difference": 0,
+      "mean_absolute_difference_changed": 0,
+      "mean_absolute_difference_all_comparable": 0.0
+    }
+  },
+  "all_device_average_changes": {
+    "comparable_cells": 218148,
+    "changed_cells": 0,
+    "max_absolute_difference": 0,
+    "mean_absolute_difference_changed": 0,
+    "mean_absolute_difference_all_comparable": 0.0
+  },
+  "structural_checks_passed": true,
+  "phase3a_validated_rows": 19984,
+  "phase3a_p90_before": 22.428666649999997,
+  "phase3a_p90_after": 22.428666649999997,
+  "statistics_artifact_changes": {
+    "all_devices_observed": {},
+    "phase3a_stable_cohort": {}
+  },
+  "comparison_definition": "Exact numeric comparison of exported 6-decimal values on common epochs; blank vs populated is an availability change.",
+  "downstream_scope": "Validated aligned schema, timestamp consistency, availability/count/confidence invariants, finite readings, averages, and the 19,984-row Phase 3A contract. Downstream Phase 2/3 production outputs were not regenerated."
+}

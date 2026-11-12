@@ -1,5 +1,12 @@
 # Transformation Script Usage
 
+For the current controlled-results interpretation, source/adaptation
+crosswalk, scope limits, and optional follow-on decisions, see the
+[governing project plan](../Distributed_Monitoring_POC_Project_Plan.md),
+especially its [current Phase 3A results](../Distributed_Monitoring_POC_Project_Plan.md#current-phase-3a-controlled-results).
+Older dated story sections below are historical unless explicitly identified
+as current workflow instructions.
+
 ## Project configuration
 
 [`config/project_config.yaml`](../config/project_config.yaml) is the single
@@ -834,7 +841,7 @@ Stage 4 checks:
 ## Phase 3A Stable-Cohort History and Clustering
 
 **Current execution:** use the [three-file workflow](#us-332-three-file-workflow-and-verified-cutover).
-Current output formats follow the [approved six-file artifact contract](#us-333-approved-phase3-artifact-bundle);
+Current output formats follow the [approved six-file artifact contract](#us-333-approved-phase3_-artifact-bundle);
 story-numbered file inventories below describe their preserved historical formats.
 The original notebook and six compatibility modules have been retired. The
 US-3.18 through US-3.31 sections below retain scientific context and migration
@@ -1554,7 +1561,7 @@ test-ID/reason diagnostics and remain failures, not passing validation.
 ### US-3.31 saved-results-only analysis notebook
 
 > Historical layout note: this section describes the pre-US-3.34 `phase3_current`
-> directory. Use [US-3.34](#us-334-phase3-output-and-operational-layout) for
+> directory. Use [US-3.34](#us-334-phase-3-output-and-operational-layout) for
 > active paths and commands.
 
 Open [`phase3_analyze.ipynb`](phase3_analyze.ipynb), select the project's Python
@@ -1654,7 +1661,7 @@ US-3.32 completes the retirement and full-matrix cutover below.
 ### US-3.32 three-file workflow and verified cutover
 
 > Historical cutover record. Its `phase3_current` paths and seven-file recovery
-> instructions are superseded by [US-3.34](#us-334-phase3-output-and-operational-layout).
+> instructions are superseded by [US-3.34](#us-334-phase-3-output-and-operational-layout).
 
 The maintained Phase 3 executable surface is exactly:
 
@@ -1673,9 +1680,10 @@ historical checkouts, not in this checkout.
 #### Prerequisites and normal execution
 
 Use the project Python environment with `requirements.txt` dependencies installed.
-Keep the aligned Phase 1 observations, full-precision statistics, approved
-configuration, historical matched baseline, existing US-3.21 evidence and
-original scientific reference tables in their documented locations. Jupyter and
+Keep the aligned Phase 1 observations, derived full-precision monitoring
+preparation evidence, approved configuration, historical matched baseline,
+existing US-3.21 evidence and original scientific reference tables in their
+documented locations. Jupyter and
 an IPython kernel are needed for interactive analysis; `nbclient`/`nbformat` are
 only needed for automated clean-kernel execution.
 
@@ -1777,7 +1785,7 @@ candidate and recovery evidence needs a separate backup; Git does not preserve i
 ### US-3.33 approved phase3_ artifact bundle
 
 > Historical schema-version-1 bundle. Its six-file layout and `phase3_current`
-> commands are superseded by [US-3.34](#us-334-phase3-output-and-operational-layout).
+> commands are superseded by [US-3.34](#us-334-phase-3-output-and-operational-layout).
 
 The user-approved current output contract is **six files**, all prefixed
 `phase3_`. The three executable workflow files remain unchanged in responsibility.

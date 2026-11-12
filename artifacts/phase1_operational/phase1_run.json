@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "quality_gates_passed": true,
+  "created_utc": "2026-11-12T13:24:55+00:00",
+  "qc": {
+    "files_processed": 3471,
+    "rows_total": 79274744,
+    "rows_schema_valid": 79274744,
+    "rows_schema_invalid": 0,
+    "rows_temperature": 9909343,
+    "rows_temperature_valid": 9899253,
+    "rows_temperature_invalid": 0,
+    "rows_temperature_duplicate": 10090,
+    "devices_seen_count": 8,
+    "snapshot_count": 218148,
+    "schema_validity_percent": 100.0,
+    "duplicate_key_rate_percent": 0.101823,
+    "stale_snapshot_rate_percent": 0.971359,
+    "device_coverage_percent": 99.028641,
+    "excluded_non_source_csv_filenames": [
+      "temperature_raw.csv"
+    ]
+  },
+  "gate_checks": [
+    {
+      "gate": "schema_validity_min_percent",
+      "metric": "schema_validity_percent",
+      "operator": ">=",
+      "actual": 100.0,
+      "threshold": 100.0,
+      "passed": true
+    },
+    {
+      "gate": "duplicate_key_rate_max_percent",
+      "metric": "duplicate_key_rate_percent",
+      "operator": "<=",
+      "actual": 0.101823,
+      "threshold": 0.5,
+      "passed": true
+    },
+    {
+      "gate": "stale_snapshot_rate_max_percent",
+      "metric": "stale_snapshot_rate_percent",
+      "operator": "<=",
+      "actual": 0.971359,
+      "threshold": 10.0,
+      "passed": true
+    },
+    {
+      "gate": "device_coverage_min_percent",
+      "metric": "device_coverage_percent",
+      "operator": ">=",
+      "actual": 99.028641,
+      "threshold": 90.0,
+      "passed": true
+    }
+  ],
+  "general_statistics": [
+    {
+      "series_name": "all_devices_observed",
+      "source_column": "average_temperature_all_devices",
+      "confidence_filter": "snapshot_confidence_gt_0.75",
+      "filtered_snapshot_count": 216029,
+      "non_null_value_count": 216029,
+      "mean": 22.530749,
+      "std_dev": 1.488073,
+      "p05": 20.246875,
+      "p10": 20.7525,
+      "p15": 21.1075,
+      "p20": 21.381875,
+      "p25": 21.584286,
+      "p30": 21.78375,
+      "p35": 21.947143,
+      "p40": 22.108571,
+      "p45": 22.272143,
+      "p50": 22.43825,
+      "p55": 22.59125,
+      "p60": 22.768572,
+      "p65": 22.965625,
+      "p70": 23.161429,
+      "p75": 23.352143,
+      "p80": 23.578125,
+      "p85": 23.890714,
+      "p90": 24.343381,
+      "p95": 25.045
+    }
+  ],
+  "settings": {
+    "global": {
+      "timezone": "UTC",
+      "bucket_size_seconds": 60,
+      "min_devices_per_snapshot": 6,
+      "drop_snapshot_if_stale_over_threshold": true
+    },
+    "phase1": {
+      "stale_threshold_seconds": 120
+    },
+    "confidence_scoring": {
+      "completeness_weight": 0.7,
+      "freshness_weight": 0.3,
+      "formula": "confidence = 0.7 * completeness_component + 0.3 * freshness_component"
+    },
+    "summary_statistics": {
+      "confidence_threshold": 0.75,
+      "percentiles": [
+        5,
+        10,
+        15,
+        20,
+        25,
+        30,
+        35,
+        40,
+        45,
+        50,
+        55,
+        60,
+        65,
+        70,
+        75,
+        80,
+        85,
+        90,
+        95
+      ]
+    },
+    "quality_gates": {
+      "schema_validity_min_percent": 100,
+      "duplicate_key_rate_max_percent": 0.5,
+      "stale_snapshot_rate_max_percent": 10,
+      "device_coverage_min_percent": 90
+    }
+  },
+  "data_dir": "C:\\Users\\mcphe\\Dropbox\\Business\\Data\\sensor_project\\Data\\files_csv",
+  "config_path": "C:\\Users\\mcphe\\Dropbox\\Business\\Data\\sensor_project\\config\\project_config.yaml",
+  "artifacts": {
+    "raw_index": "C:\\Users\\mcphe\\Dropbox\\Business\\Data\\sensor_project\\artifacts\\phase1_operational\\phase1_source_inventory.csv",
+    "phase1_aligned": "C:\\Users\\mcphe\\Dropbox\\Business\\Data\\sensor_project\\artifacts\\phase1_operational\\phase1_aligned_temperature.csv"
+  },
+  "hashes": {
+    "raw_index_sha256": "24b0c814b1382d365ab612c1e1475902cd8632d07b7739e4ee286465de924f93",
+    "phase1_aligned_sha256": "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b"
+  },
+  "implementation_sha256": "b0da587f756767b4fb9262836e95ec9c2ef63d8fd0fe69f0b76c1bc0bb9828de",
+  "config_sha256": "a1d5ef4f8bd3e07220e78533c8bf3c63ad219f43dda9f3f2e60242ba6a4a3fc9",
+  "limited_run": false
+}

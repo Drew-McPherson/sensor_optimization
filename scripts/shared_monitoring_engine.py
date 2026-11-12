@@ -18,9 +18,33 @@ import tempfile
 import unittest
 
 import pandas as pd
+import yaml
 
 
 PHASE3A_APPROVED_SENSOR_IDS = ("A", "C", "D", "E", "F", "G")
+PROJECT_CONFIG_PATH = Path("config/project_config.yaml")
+PHASE3A_CONFIG_SECTION = "phase3a_experiment"
+
+
+def load_project_config(root: Path) -> dict[str, Any]:
+    """Load the single canonical project configuration."""
+    config_path = root.resolve() / PROJECT_CONFIG_PATH
+    with config_path.open(encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    if not isinstance(config, dict):
+        raise ValueError(f"Project configuration must be a YAML mapping: {config_path}")
+    return config
+
+
+def load_phase3a_config(root: Path) -> dict[str, Any]:
+    """Load the Phase 3A experiment section from the canonical configuration."""
+    config = load_project_config(root)
+    experiment = config.get(PHASE3A_CONFIG_SECTION)
+    if not isinstance(experiment, dict):
+        raise ValueError(
+            f"Project configuration is missing its {PHASE3A_CONFIG_SECTION!r} mapping."
+        )
+    return experiment
 
 
 def _safe_numeric(v: Any) -> Optional[float]:
@@ -235,8 +259,8 @@ def historical_input_matches(root: Path, historical: str, current: str) -> bool:
 def prepare_monitoring(root: Path) -> dict:
     """Derive cohort statistics without writing configuration or artifacts."""
     root = root.resolve()
-    config_path = root / "config" / "phase3a_experiment_config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config_path = root / PROJECT_CONFIG_PATH
+    config = load_phase3a_config(root)
     validate_preparation_policy(config)
     input_path = root / config["input_source"]
     before = {"input_sha256": _hash(input_path), "config_sha256": _hash(config_path)}
@@ -250,7 +274,7 @@ def prepare_monitoring(root: Path) -> dict:
         or publication.get("status") != "passed"
         or publication.get("hashes", {}).get("phase1_aligned_sha256") != before["input_sha256"]
         or publication.get("implementation_sha256") != _hash(root / "scripts" / "phase1_implement.ipynb")
-        or publication.get("config_sha256") != _hash(root / "config" / "transformation_defaults.yaml")
+        or publication.get("config_sha256") != _hash(config_path)
     ):
         raise ValueError("Phase 1 publication is failed, incomplete, or stale for the aligned input.")
     with input_path.open(encoding="utf-8", newline="") as stream:
@@ -626,8 +650,8 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
     """Run only the locked matched experiment, writing separate compact outputs."""
     root = root.resolve()
     artifacts = root / "artifacts"
-    config_path = root / "config" / "phase3a_experiment_config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config_path = root / PROJECT_CONFIG_PATH
+    config = load_phase3a_config(root)
     locked = {
         "experiment_name": "phase3a_stable_cohort",
         "selected_sensor_ids": list("ACDEFG"),
@@ -1005,10 +1029,9 @@ RECEIPT = Path("artifacts/phase2_operational/phase2_validation.json")
 SOURCES = (
     "scripts/shared_monitoring_engine.py",
     "scripts/test_shared_monitoring.py",
-    "config/phase3a_experiment_config.json",
+    "config/project_config.yaml",
     "artifacts/phase1_operational/phase1_aligned_temperature.csv",
     "scripts/phase1_implement.ipynb",
-    "config/transformation_defaults.yaml",
     "artifacts/phase1_operational/phase1_run.json",
     "artifacts/phase3_operational/references/phase3a_phase2_baseline.json",
 )

@@ -6,6 +6,29 @@ The [project history](project_history.md) preserves the original discussions,
 pivot, implementation milestones, and point-in-time decisions; it does not
 govern current requirements.
 
+## Implementation and Evidence Status (verified 2026-11-12)
+
+- **Phase 1 transformation and shared monitoring preparation:** implemented.
+  The current Phase 1 receipt records 77 passing tests; shared preparation
+  derives the stable-cohort P90 from aligned data rather than storing it in
+  Phase 1 statistics or configuration.
+- **Matched Phase 2 and Phase 2/C0 equivalence:** implemented. The current
+  matched summary reports 9,159 messages, 467 synchronizations, and passing
+  sampled-state correctness. Its independent receipt records 49 passing tests.
+- **C0/C1/C2 controls and FMIC/SMIC:** implemented. The current Phase 3 run
+  (`2026-11-12T13:31:38.792440+00:00`) contains three controls and 38 clustered
+  configurations. Its independent receipt records 170 passing tests and is
+  hash-referenced by the summary. The read-only saved-results loader passed
+  against this run and its current inputs, configuration, outputs, and receipt.
+- **Current reporting:** `scripts/phase3_analyze.ipynb` reads and analyzes saved
+  outputs only; the governing current interpretation is in §7.4. No production
+  rerun was performed for this documentation update.
+- **Not demonstrated / deferred:** the original eight-device multivariate POC,
+  a separately measured event-level detection-delay distribution,
+  out-of-sample threshold or alpha performance, intermittent-availability
+  robustness, and physical network latency, energy, bandwidth, or fault
+  tolerance. Their status is not upgraded by the current receipts.
+
 ## 1) How To Read This Plan
 
 **Phase 1 ownership update (2026-11-11, US-1.16):**
@@ -40,20 +63,28 @@ The approved Phase 3A design uses fixed participation; changing contributors,
 re-entry, and availability-triggered synchronization are not part of the
 primary FMIC/SMIC experiment.
 
-Primary project sequence:
-1. Phase 1 produces aligned temperature snapshots and general statistics.
-2. Shared monitoring preparation validates the stable cohort and derives its full-precision P90 from Phase 1 output.
-3. Phase 2 produces the matched, two-sided equal-allowance baseline and an independent validation receipt.
-4. Phase 3 validates Phase 2/C0 singleton equivalence, then evaluates C0/C1/C2 controls and FMIC/SMIC over the 19-value alpha grid. Independent tests and saved-results analysis remain separate. Clustered algorithms determine their own synchronization times.
-5. Phase 3B is an optional later robustness extension for the broader dataset with changing sensor availability. It is not on the Phase 3A critical path.
-6. Multivariate extension remains deferred until the temperature-only clustering experiment is validated and interpreted.
+Maintained execution order for a new reproducible run:
+1. Phase 1 publishes aligned temperature snapshots and general statistics.
+2. Shared monitoring preparation validates the stable cohort and derives its
+   full-precision P90 from the aligned Phase 1 output.
+3. Phase 2 produces the matched, two-sided equal-allowance baseline and an
+   independent validation receipt.
+4. Phase 3 validates Phase 2/C0 singleton equivalence, then evaluates C0/C1/C2
+   controls and FMIC/SMIC over the 19-value alpha grid. Independent tests and
+   saved-results analysis remain separate; clustered algorithms determine their
+   own synchronization times.
+5. Phase 3B is an optional later robustness extension for the broader dataset
+   with changing sensor availability; it is not on the Phase 3A critical path.
+6. Multivariate monitoring remains deferred. The sponsor has not yet decided
+   whether the overall POC objective should be formally revised to temperature-
+   only or retained as a distinct later multivariate phase.
 
 ---
 
 ## 2) Conflict Resolution And Locked Decisions
 
 Precedence rule for this repository:
-1. The definitive methodology source is `140516editor Book Chapter (Last Version).pdf`, *Clustering for Monitoring Distributed Data Streams*. If this plan or another summary conflicts with the chapter on history, normalization, clustering mathematics, FMIC/SMIC calculations, or source-comparable broadcast accounting, the chapter takes precedence **for those source-defined methods**. Explicitly labeled project adaptations (separate root, exact threshold boundary, transmission accounting, and all-zero-weight fallback) govern this project’s experimental implementation and must not be presented as formulas supplied by the chapter.
+1. The definitive methodology source is [`Writing/Motivation/140516editor Book Chapter (Last Version).pdf`](Writing/Motivation/140516editor%20Book%20Chapter%20%28Last%20Version%29.pdf), *Clustering for Monitoring Distributed Data Streams*. If this plan or another summary conflicts with the chapter on history, normalization, clustering mathematics, FMIC/SMIC calculations, or source-comparable broadcast accounting, the chapter takes precedence **for those source-defined methods**. Explicitly labeled project adaptations (separate root, exact threshold boundary, transmission accounting, and all-zero-weight fallback) govern this project’s experimental implementation and must not be presented as formulas supplied by the chapter.
 2. This plan governs the current project design, population, project adaptations, and implementation requirements. The project history and completed user stories record prior decisions and do not override it.
 3. Section 1.4 and Algorithms 1.4.1–1.4.2 of the definitive chapter define the clustering/monitoring method; the chapter appendices define moment calculations and source-comparable broadcast accounting.
 4. Existing Phase 3 user stories remain historical implementation records; resolve superseded requirements using this plan and later approved decisions.
@@ -100,16 +131,107 @@ Precedence rule for this repository:
 29. Phase 3B is optional. Phase 3A must be completed and interpreted before any Phase 3B work is considered required.
 30. Existing Phase 3 user stories are not rewritten retroactively; this plan records the current Phase 3A requirements.
 
+### 2.3 Source-to-Implementation Crosswalk
+
+The chapter is the authority for its methodology; the original work statement
+defines the broader POC objective, not the chapter's mathematical rules. The
+available work statement is
+[`Writing/Motivation/Distributed_Data_Streams (1).pdf`](Writing/Motivation/Distributed_Data_Streams%20%281%29.pdf);
+its title and six-page contents were checked against the source. The slides at
+[`Writing/Motivation/Sample Slides (2).pdf`](Writing/Motivation/Sample%20Slides%20%282%29.pdf)
+are supplementary only. The crosswalk below identifies each source location,
+classification, project treatment, rationale, and verification method; it does
+not claim that every source theorem was empirically established by this
+temperature-only study.
+
+1. **Global function and geometric constraints** — Chapter §§1.1 and 1.3 and
+   work statement pp. 1–2. **Classification:** source-derived general problem;
+   scalar temperature is a project instance. **Treatment:** Phase 3A monitors
+   the mean of six scalar temperature streams against one threshold.
+   **Rationale / verification:** the scalar instance does not empirically
+   establish the chapter's multivariate or nonlinear guarantees; verify the
+   selected columns and offline mean oracle in saved run evidence.
+2. **Signed change and discounted history** — Chapter §1.4.
+   **Classification:** source-derived. **Treatment:** retain signed history
+   across ordinary synchronizations and update it from the active reference.
+   **Rationale / verification:** this preserves cancellation information;
+   verify with hand-calculated history and normalization tests.
+3. **Normalization, clustering, size penalty, and greedy merging** — Chapter
+   §1.4, Eqs. 1.8–1.10, Algorithm 1.4.1. **Classification:** source-derived
+   for scalar histories. **Treatment:** normalize signed histories, sum before
+   taking absolute values, apply alpha's cluster-size penalty, and follow the
+   specified greedy candidate selection. **Rationale / verification:** this
+   maintains the source mathematics while fixing project dimension and
+   deterministic edge conventions; verify formula, partition, and synthetic
+   clustering tests.
+4. **Moments and node-dependent allowances** — Chapter §1.4, Algorithm 1.4.2,
+   Appendix 1. **Classification:** source-derived formulas with
+   project-tested conventions. **Treatment:** FMIC and SMIC use the shared
+   monitoring lifecycle and their respective moment/allowance calculations
+   in §6.9. **Rationale / verification:** this separates weighting from
+   clustering; verify hand calculations and saved C1/C2 controls.
+5. **Coordinator checks and broadcast accounting** — Chapter §1.4 and
+   Appendix 2. **Classification:** source-derived concept; project transmission
+   totals are an adaptation. **Treatment:** report actual transmissions in
+   the six-sensor-plus-separate-root model; do not equate root-as-sensor
+   broadcast estimates with project totals. **Rationale / verification:**
+   topology and accounting units differ; verify all seven categories and three
+   pathways reconcile.
+6. **Separate root, sensor coordinators, self-messages, and actual requests,
+   responses, and updates** — Locked decisions §§2.2 and 7.3.
+   **Classification:** project adaptation. **Treatment:** use six sensors plus
+   a distinct root, a participating sensor as coordinator, and zero-cost
+   self-messages. **Rationale / verification:** this specifies topology and
+   unit; verify category/pathway accounting and singleton controls.
+7. **Two-sided SAFE/VIOLATED persistence and absolute local deviations** —
+   Project §§5–7 and US-3.23. **Classification:** project monitoring-policy
+   adaptation. **Treatment:** retain the last root-known state between
+   synchronizations and use absolute distance to the threshold in both
+   directions. **Rationale / verification:** do not attribute this policy to
+   a chapter theorem; verify Phase 2/C0 per-bucket equivalence and bidirectional
+   correctness.
+8. **Global SAFE `<` / VIOLATED `>=` and local `>=` checks** — Locked
+   decisions §§2.2 and 5–7. **Classification:** project boundary adaptation.
+   **Treatment:** equality is globally VIOLATED and triggers a local check.
+   **Rationale / verification:** this deterministic convention includes zero
+   allowance; verify exact-boundary tests.
+9. **All-zero fallbacks and deterministic coordinator/tie rules** — Locked
+   decisions and §6.9. **Classification:** project edge-case and tie
+   adaptations. **Treatment:** use the singleton all-zero-history fallback,
+   equal all-zero-weight fallback, lexicographically highest coordinator, and
+   specified tie rules. **Rationale / verification:** these are implementation
+   choices, not source formulas; verify their named tests and saved conventions.
+10. **Eight-device environmental-vector objective and detection delay** — Work
+    statement pp. 4–6. **Classification:** original POC requirement, not
+    demonstrated by Phase 3A. **Treatment:** retain the six-sensor
+    temperature-only study as a bounded completed experiment; multivariate
+    operation and event-level delay remain unfulfilled/not separately
+    evaluated. **Rationale / verification:** verify source scope; no
+    multivariate or physical latency experiment was run. See §§3, 7.2, and 12.
+11. **Stable six-sensor cohort and availability robustness** — Project pivot
+    and work statement pp. 4–6. **Classification:** project scope adaptation;
+    broader work deferred. **Treatment:** Phase 3A uses A, C, D, E, F, and G
+    continuously; Phase 3B is optional and separate. **Rationale /
+    verification:** do not infer completion of the original broader objective;
+    verify the locked cohort and report limits.
+
 ---
 
 ## 3) Executive Summary (Discussion View)
 
-### What This Experiment Is Proving
-The project tests two linked questions:
-1. whether deterministic distributed monitoring can reduce communication relative to centralized all-sensor-every-minute messaging while preserving correct global-threshold monitoring; and
-2. how source-aligned weighting and FMIC/SMIC clustering affect communication relative to matched singleton controls while preserving correct monitoring.
+### What This Experiment Measures
+The completed Phase 3A study is a deterministic offline simulation of a
+distributed monitoring protocol, not a deployed sensor network. It compares
+logical message transmissions under one fixed six-sensor temperature cohort,
+one retrospective empirical threshold, and the saved control/alpha
+configurations. Its sampled-state correctness results apply to the observed
+60-second buckets and the modeled reliable-communication assumptions only.
 
-For Phase 3A, the experiment deliberately removes changing sensor availability as a confounder. The selected six sensors are continuously observed for the full approved interval, so communication differences can be interpreted primarily as algorithm differences rather than availability-management effects.
+The controlled weighting and conditional-clustering results are summarized in
+§7.4. They are dataset-specific contrasts, not general causal effects or
+statistically significant population estimates. The alpha grid is exploratory
+in-sample; the P90 is derived retrospectively from the same interval used for
+evaluation.
 
 ### Why This Design Is Deterministic
 The workflow does not train a predictive model. It applies fixed rules over aligned minute-bucket data:
@@ -118,16 +240,16 @@ The workflow does not train a predictive model. It applies fixed rules over alig
 3. fixed history, clustering, allowance, boundary, synchronization, and message-counting rules;
 4. shared implementation logic for FMIC and SMIC except where the source defines different weight/allowance calculations.
 
-### What Success Looks Like
-1. The Phase 3A input contract passes: six approved sensors, approved inclusive interval, 19,984 buckets, exact 60-second timestamp spacing, and no missing selected-sensor readings.
-2. The cohort-specific p90 is reproducibly calculated by shared monitoring preparation and recorded in downstream run evidence.
-3. A matched Phase 2 baseline is produced from the same experimental population.
-4. Source-aligned history, normalization, clustering, FMIC, and SMIC formulas pass focused synthetic and hand-calculated tests; Phase 2 and C0 pass per-bucket protocol equivalence.
-5. No correctness test shows a global threshold violation concealed by cluster cancellation.
-6. Communication categories reconcile exactly to total messages.
-7. Phase 3A production artifacts remain small enough to inspect and manage directly.
-8. The final Phase 2/FMIC/SMIC comparison is understandable without reconstructing gigabytes of intermediate state.
-9. Phase 3B availability robustness is treated as optional follow-on work rather than a prerequisite for the core result.
+### Original POC Scope Checkpoint
+The original work statement specifies eight devices and global monitoring of
+environmental vectors including temperature, humidity, pressure, gas/IAQ, and
+light, and asks for “Detection delay compared to centralized monitoring.”
+Phase 3A instead completes a temperature-only scalar threshold experiment over
+six continuously observed sensors. It does not fulfill the multivariate,
+eight-device, availability-robustness, or separately measured delay objectives.
+Whether the overall POC is formally revised to temperature-only or retains the
+original objective as a distinct later phase remains an unresolved sponsor
+decision; this plan does not make that decision.
 
 ---
 
@@ -145,24 +267,31 @@ statistics are in `artifacts/phase1_outputs/`. Shared monitoring preparation
 derives the Phase 3A threshold from the aligned output.
 
 ### Phase 2 - Deterministic Temperature Sensor Monitoring
-Objective: execute deterministic local-deviation monitoring and re-sync logic on aligned snapshots.
+Implemented: the deterministic local-deviation monitor is maintained for the
+matched stable-cohort run as well as the separate historical full-data workflow.
 
 Two Phase 2 results are distinguished:
 1. **Existing full-data Phase 2 result:** retained as historical evidence of the availability-aware implementation.
-2. **Matched Phase 3A Phase 2 baseline:** rerun the existing Phase 2 engine on the six approved sensors and locked 19,984-bucket continuous interval using the Phase 3A-specific p90. This is the comparator used for FMIC/SMIC.
+2. **Matched Phase 3A Phase 2 baseline:** the existing Phase 2 engine was run on the six approved sensors and locked 19,984-bucket continuous interval using the Phase 3A-specific P90. This is the current comparator used for FMIC/SMIC.
 
 ### Phase 3A - Stable-Cohort Temperature Clustering Extension
 Objective: measure weighting and clustering effects separately while preserving monitoring correctness under matched inputs and accounting.
 
-Required sequence:
-1. Validate the Phase 3A input contract and derive the Phase 3A p90.
-2. Produce the matched stable-cohort Phase 2 baseline.
-3. Simplify the existing Phase 3 implementation by removing availability-only branches and oversized production traces from the Phase 3A path.
-4. Preserve and revalidate source-aligned history, normalization, partition quality, and greedy clustering already implemented.
-5. Implement FMIC end-to-end using one baseline alpha and validate it.
-6. Implement SMIC through the same monitoring architecture and validate it independently.
-7. Require revised Phase 2/C0 per-bucket equivalence, then evaluate C0/C1/C2 controls.
-8. Run the 38 clustered alpha configurations and compare weighting and clustering effects only after the control and correctness gates pass.
+Implemented sequence and maintained requirements:
+1. The Phase 3A input contract is validated and the P90 is derived by shared
+   monitoring preparation.
+2. The matched stable-cohort Phase 2 baseline is published with an independent
+   validation receipt.
+3. Availability-only branches and oversized production traces are excluded
+   from the Phase 3A primary workflow.
+4. Source-aligned history, normalization, partition quality, and greedy
+   clustering are retained and independently tested.
+5. FMIC and SMIC share the maintained monitoring architecture and have
+   independent algorithm/correctness coverage.
+6. Per-bucket Phase 2/C0 equivalence is validated before interpreting C0/C1/C2
+   and clustered configurations.
+7. The three controls and 38 clustered configurations are present in the
+   current saved results; see §7.4.
 
 **Recorded status:** US-3.23 revised Phase 2; US-3.24 established C0 equivalence; US-3.25/3.26 completed and hardened the controlled evaluation. Later workflow consolidation retained the scientific results. See §§7, 11, and 14.
 
@@ -174,7 +303,9 @@ Phase 3B is not required for Phase 3A completion and must not delay FMIC/SMIC im
 ### Phase 4 - Validation And Packaging
 Objective: consolidate compact metrics, selected cluster-event records, tuning results, correctness evidence, limitations, and stakeholder-ready outputs.
 
-Interpretation rule: the initial clustering experiment remains temperature-only. Multivariate monitoring is deferred so that clustering effects are not confounded with a simultaneous change in dimensionality.
+Interpretation rule: the completed clustering experiment remains
+temperature-only. Multivariate monitoring is deferred so that clustering
+effects are not confounded with a simultaneous change in dimensionality.
 
 ---
 
@@ -211,16 +342,32 @@ Required columns in aligned Phase 1 input:
 1. bucket_epoch.
 2. bucket_time_utc.
 3. per-sensor temperature columns (for example A_temperature through H_temperature).
-4. average_temperature_all_devices (strict global average source).
+4. For the Phase 3A matched population, use only A_temperature, C_temperature,
+   D_temperature, E_temperature, F_temperature, and G_temperature to calculate
+   the six-sensor mean used by monitoring preparation and the offline oracle.
+5. `average_temperature_all_devices` is the separate Phase 1 general/full-data
+   series, formed under Phase 1 availability rules. It is not the Phase 3A
+   six-sensor mean or oracle.
 
 ### 6.2 Threshold Derivation
 1. The existing full-data Phase 2 run retains its historical threshold provenance.
-2. For Phase 3A, filter `aligned_phase1_temperature.csv` to sensors A, C, D, E, F, and G over the locked interval.
-3. Compute the six-sensor average for every one of the 19,984 complete, consecutive one-minute buckets.
+2. For Phase 3A, read `artifacts/phase1_operational/phase1_aligned_temperature.csv`
+   and filter sensors A, C, D, E, F, and G over the locked interval.
+3. Compute the six-sensor average for every one of the 19,984 complete,
+   consecutive one-minute buckets. This is the Phase 3A observed global mean;
+   do not substitute `average_temperature_all_devices`.
 4. Compute the Phase 3A p90 programmatically from that experimental series.
-5. Shared monitoring preparation validates the cohort and records the derived threshold and provenance in downstream run evidence; it does not add a Phase 1 statistics row.
-6. The planning estimate is approximately `22.42866665`, but the run must use the computed full-precision value rather than a hard-coded approximation.
-7. Matched Phase 2 and all Phase 3 configurations must use the same validated, full-precision derived P90.
+5. The p90 is retrospective and dataset-specific: it is derived from the same
+   six-sensor, 19,984-bucket population used for evaluation. It is an empirical
+   experimental threshold, not an externally validated operating or equipment
+   safety limit or independent calibration.
+6. Shared monitoring preparation validates the cohort and records the derived
+   threshold and provenance in downstream run evidence; it does not add a
+   Phase 1 statistics row or hard-code the threshold in configuration.
+7. The recorded full-precision result is `22.428666649999997 °C`; the run must
+   use its computed full-precision value rather than a hard-coded approximation.
+8. Matched Phase 2 and all Phase 3 configurations must use the same validated,
+   full-precision derived P90.
 
 ### 6.3 State Initialization
 1. Start with undefined global/per-sensor references and margins, no prior membership set, and initialization pending.
@@ -284,6 +431,12 @@ matched run validates the locked stable cohort and derives its P90. Run the
 current implementation and independent test notebooks as described in
 [Phase 2 usage](scripts/README_scripts.md#us-216-matched-phase-2-notebooks).
 No alternate monitoring state machine is required.
+
+The historical full-data `phase2_temperature_sensors.csv` and archived general-
+dataset notebook are not the current matched Phase 2 evidence. The active
+matched evidence is `artifacts/phase2_outputs/phase2_summary.json`,
+`artifacts/phase2_operational/phase2_events.csv`, and its independent
+`artifacts/phase2_operational/phase2_validation.json` receipt.
 
 ### 6.8 Phase 3A Experiment Input Contract
 Phase 3A uses the temperature streams as scalar node streams and preserves the same global temperature-threshold objective used by the matched Phase 2 run.
@@ -402,9 +555,27 @@ For each Phase 3A algorithm/configuration:
 1. actual global condition is evaluated from the six-sensor observed mean using the Phase 3A p90 and canonical boundary rule;
 2. no selected-sensor observation is missing, so every Phase 3A bucket is globally evaluable;
 3. cluster cancellation is acceptable only if it does not conceal a true global threshold violation;
-4. correctness requires the **last root-known state** to agree with the actual global threshold state at each bucket; count false-safe and false-violated states separately, and fail if either count is nonzero;
+4. correctness requires the **last root-known state after that bucket's
+   protocol events** to agree with the actual global threshold state at every
+   sampled bucket; count false-safe and false-violated states separately, and
+   fail if either count is nonzero;
 5. the actual six-sensor mean is evaluated offline for validation and must not silently trigger a communication event;
 6. correctness test status is a gate for interpreting communication savings.
+
+The original work statement (p. 6) also requests **“Detection delay compared to
+centralized monitoring.”** A sampled transition is a SAFE-to-VIOLATED or
+VIOLATED-to-SAFE change between consecutive oracle buckets. Root recognition is
+the state after completing that bucket's protocol events, compared with a
+centralized monitor receiving all six readings in that same bucket. Current
+saved evidence establishes sampled-bucket root-known-state agreement; it does
+not separately report an event-level delay distribution. Such a delay is
+**not separately evaluated**. If separately derived from suitable replay
+evidence in future work, define delay as
+`max(0, root_recognition_bucket_index - oracle_transition_bucket_index)` for
+each direction and report transition counts, bucket-edge/post-processing
+convention, initialization, censoring, and non-detection. Zero sampled-bucket
+mismatches are not a measurement of sub-minute latency. Physical/network
+delivery delay is outside the present model.
 
 ### 7.3 Phase 3A Communication Metrics
 Report actual transmission counts by category:
@@ -440,6 +611,92 @@ For matched Phase 2, the controls, and FMIC/SMIC report at minimum:
 9. correctness-pass status.
 
 The centralized Phase 3A sensor-message baseline is `19,984 * 6 = 119,904` one-way sensor transmissions if defined as one transmission per sensor per minute. Any alternative centralized counting convention must be named explicitly and applied consistently.
+
+#### Current Phase 3A Controlled Results
+
+The following saved-results comparison is the current primary result. The
+matched Phase 2 and C0 totals and root synchronization count agree, and the
+current C0 equivalence evidence is checked per bucket, not inferred from equal
+totals alone. The read-only saved-results loader passed for the run recorded
+2026-11-12; the Phase 3 independent receipt records 170 passing tests, and the
+matched Phase 2 receipt records 49. The current Phase 3 result file contains
+three controls and all 38 FMIC/SMIC alpha rows; all report passed sampled-state
+correctness and zero false-safe/false-violated buckets. Each configuration
+records 1,999 globally violated sampled buckets.
+
+| Configuration | Messages | Root synchronizations (incl. initialization) | Change vs revised Phase 2/C0 (9,159) | Conditional change vs weighted singleton | Change vs centralized reference (119,904) |
+|---|---:|---:|---:|---:|---:|
+| Revised Phase 2 / C0, equal allowances | 9,159 | 467 | 0.00% | — | 92.36% fewer |
+| C1, FMIC weighting only | 8,964 | 457 | 2.13% fewer | — | 92.52% fewer |
+| C2, SMIC weighting only | 8,962 | 457 | 2.15% fewer | — | 92.53% fewer |
+| Full FMIC, alpha 0.10 (prespecified) | 11,922 | 293 | 30.17% more | 33.00% more vs C1 | 90.06% fewer |
+| Full SMIC, alpha 0.10 (prespecified) | 11,902 | 293 | 29.95% more | 32.81% more vs C2 | 90.07% fewer |
+| Full FMIC, alpha 0.65 (exploratory grid minimum) | 8,722 | 436 | 4.77% fewer | 2.70% fewer vs C1 | 92.73% fewer |
+| Full SMIC, alpha 0.65 (exploratory grid minimum) | 8,720 | 436 | 4.79% fewer | 2.70% fewer vs C2 | 92.73% fewer |
+
+Percentages are recomputed from saved message totals using
+`100 * (1 - M(configuration) / M(reference))`; positive values mean fewer
+messages and negative values mean more. The centralized reference is only one
+transmission per sensor per minute under the stated simplified convention, not
+end-to-end deployed-network cost.
+
+The controls show modest weighting-only differences under a shared singleton
+protocol. At alpha 0.10, full FMIC/SMIC use more total messages than their
+corresponding weighted singleton controls despite fewer root synchronizations.
+At alpha 0.65, the additional reduction relative to C1/C2 is approximately
+2.70% for each method. This is conditional on the tested weighting, data, and
+grid; weighting and clustering effects may interact and are not additive or
+generally causal.
+
+At alpha 0.65, both methods use a full-singleton partition at 354 of 436
+root-synchronization events, or **81.19266055045871%** (including
+initialization). This is an event share, not a share of the 19,984 observation
+buckets. The grid minimum is exploratory and in-sample, not a universal or
+out-of-sample optimum. Alpha response is irregular; no statistical significance
+or population-level superiority is established. FMIC/SMIC's small observed
+differences do not establish general algorithmic superiority.
+
+Actual transmitted-message categories for the seven displayed configurations
+are:
+
+| Configuration | Sensor trigger | Cluster-check requests | Cluster-check responses | Coordinator-to-root escalations | Root-sync requests | Root-sync responses | Root state updates | Total |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| C0 | 0 | 0 | 0 | 753 | 2,802 | 2,802 | 2,802 | 9,159 |
+| C1 | 0 | 0 | 0 | 738 | 2,742 | 2,742 | 2,742 | 8,964 |
+| C2 | 0 | 0 | 0 | 736 | 2,742 | 2,742 | 2,742 | 8,962 |
+| FMIC, alpha 0.10 | 2,564 | 1,832 | 1,832 | 420 | 1,758 | 1,758 | 1,758 | 11,922 |
+| SMIC, alpha 0.10 | 2,556 | 1,826 | 1,826 | 420 | 1,758 | 1,758 | 1,758 | 11,902 |
+| FMIC, alpha 0.65 | 70 | 61 | 61 | 682 | 2,616 | 2,616 | 2,616 | 8,722 |
+| SMIC, alpha 0.65 | 70 | 61 | 61 | 680 | 2,616 | 2,616 | 2,616 | 8,720 |
+
+In C0/C1/C2, a triggering sensor is the coordinator of its singleton cluster;
+its direct alert is counted once as a coordinator-to-root transmission, not as
+an additional sensor-trigger message. Operation counts are separate from
+messages: coordinator checks are 753/738/736 for C0/C1/C2, 3,522/3,514 at
+alpha 0.10, and 774/772 at alpha 0.65 (FMIC/SMIC). The alpha 0.10 runs include
+2,889/2,880 consecutive repeated checks; alpha 0.65 includes 60 for each
+method. A locally resolved check or repeated check is not automatically a
+root synchronization avoided.
+
+The same message totals reconcile by the three mutually exclusive pathways:
+
+| Configuration | Within-cluster messages (share) | Coordinator-to-root messages (share) | Root-wide messages (share) |
+|---|---:|---:|---:|
+| C0 | 0 (0.00%) | 753 (8.22%) | 8,406 (91.78%) |
+| C1 | 0 (0.00%) | 738 (8.23%) | 8,226 (91.77%) |
+| C2 | 0 (0.00%) | 736 (8.21%) | 8,226 (91.79%) |
+| FMIC, alpha 0.10 | 6,228 (52.24%) | 420 (3.52%) | 5,274 (44.24%) |
+| SMIC, alpha 0.10 | 6,208 (52.16%) | 420 (3.53%) | 5,274 (44.31%) |
+| FMIC, alpha 0.65 | 192 (2.20%) | 682 (7.82%) | 7,848 (89.98%) |
+| SMIC, alpha 0.65 | 192 (2.20%) | 680 (7.80%) | 7,848 (90.00%) |
+
+The protocol is an offline deterministic simulation assuming a complete stable
+cohort, accurate readings and timestamps, fixed 60-second sampling, and
+reliable message delivery. Counts do not measure bytes, physical hops,
+bandwidth, queuing, latency, energy, device/network failure, or threshold
+excursions between sampled buckets. The P90 is selected retrospectively from
+the evaluation series. Conclusions apply only to this one dataset, cohort,
+interval, empirical threshold, protocol model, and tested alpha grid.
 
 #### Controlled comparison and equivalence
 
@@ -588,22 +845,27 @@ No Phase 3B gate blocks Phase 3A completion. Phase 3B begins only after separate
 
 ---
 
-## 10) Sensitivity Matrix (Required Reruns)
+## 10) Recorded Sensitivity And Revalidation Criteria
 
 ### 10.1 Phase 2 Sensitivity
 The historical Phase 2 sensitivity work remains available for reference but is not a prerequisite for the Phase 3A matched comparison unless a specific issue requires rerunning it.
 
-### 10.2 Phase 3A Alpha Tuning
-After the independent correctness, Phase 2/C0 equivalence, and control gates pass, evaluate the following coarse grid for **both** FMIC and SMIC (19 values each, 38 runs):
+### 10.2 Recorded Phase 3A Alpha Sweep
+The current saved evaluation contains the completed coarse grid for **both**
+FMIC and SMIC (19 values each, 38 runs):
 
 `0.05, 0.10, 0.15, ..., 0.95`
 
-For each algorithm/alpha retain compact evidence:
+The saved results retain compact evidence for each algorithm/alpha:
 1. algorithm and alpha;
 2. total messages and message-category counts;
 3. false-safe count, false-violated count, and correctness-pass status;
 4. root synchronizations and selected cluster/size summary;
 5. reduction against the revised matched Phase 2 baseline.
+
+Do not rerun this grid as part of the current documentation reconciliation.
+Repeat it only after an approved scientific change to the input population,
+configuration, or algorithm, with fresh independent validation and provenance.
 
 Interpretation:
 1. alpha is a tuning parameter, not the primary research question;
@@ -612,11 +874,13 @@ Interpretation:
 4. do not require a finer sweep unless the team later decides it adds value;
 5. do not preserve full internal search traces for every alpha.
 
-### 10.3 Phase 3A Primary Comparison
-Produce the matched comparison using the same cohort, interval, threshold,
+### 10.3 Current Phase 3A Primary Comparison
+The current matched comparison uses the same cohort, interval, threshold,
 observations, boundary convention, and counting rules: revised Phase 2, the
 C0/C1/C2 singleton controls, and full FMIC/SMIC. Apply the controlled contrasts
 in §7.4 rather than attributing the entire Phase 2 difference to clustering.
+The current table is the primary result; historical US-3.22 figures are kept
+only in §14.
 
 ### 10.4 Phase 3B Availability Robustness (Optional)
 No availability sensitivity or attribution run is required for Phase 3A. If Phase 3B is approved later, define its experiment separately rather than treating it as a hidden extension of Phase 3A.
@@ -656,7 +920,7 @@ Detailed debug traces are optional and are not produced by default. Avoid duplic
 
 ---
 
-## 12) Major Risks And Mitigations
+## 12) Limitations, Major Risks, And Optional Follow-On Research
 
 1. **Risk: the stable cohort is accidentally filtered incorrectly.**  
 Mitigation: enforce the Phase 3A input contract on sensor IDs, inclusive endpoints, exact 19,984-row count, exact 60-second timestamp spacing, and complete finite observations before any monitoring begins.
@@ -664,8 +928,8 @@ Mitigation: enforce the Phase 3A input contract on sensor IDs, inclusive endpoin
 2. **Risk: the wrong threshold population is used.**  
 Mitigation: compute the Phase 3A p90 programmatically from the approved six-sensor interval in shared monitoring preparation and require matched Phase 2 and Phase 3 configurations to use the same full-precision value.
 
-3. **Risk: historical availability logic continues to complicate Phase 3A.**  
-Mitigation: add a pivot user story that removes or isolates departure, return, dynamic eligibility, changing denominator, and membership-attribution branches from the Phase 3A path.
+3. **Risk: historical availability logic could be mistaken for Phase 3A behavior.**
+Mitigation: the current Phase 3A path excludes those branches; availability robustness remains optional Phase 3B and is not inferred from the stable cohort.
 
 4. **Risk: drift from the definitive chapter's mathematical methodology while simplifying.**  
 Mitigation: simplify infrastructure and outputs, not the source-defined history, normalization, partition-quality, greedy-merge, FMIC, or SMIC mathematics; retain hand-calculated formula tests.
@@ -694,43 +958,76 @@ Mitigation: state explicitly that Phase 3A evaluates stable node participation; 
 12. **Risk: old and new user stories give AI-assisted coding contradictory instructions.**  
 Mitigation: retain historical stories and point coding tasks to this current plan and the relevant later approved requirements.
 
+### 12.1 Interpretation Limits
+
+Phase 3A covers one deterministic dataset, cohort, interval, retrospective
+threshold, fixed sampling cadence, and tested alpha grid. The full series is
+used to select the empirical P90 and observed alpha minimum; neither is an
+independent out-of-sample result. The work does not establish statistical
+significance, multivariate correctness, availability robustness, physical
+network performance, or correctness between sampled observations. The original
+POC scope remains unresolved: the sponsor may formally revise it to
+temperature-only or retain the eight-device multivariate objective as a
+distinct later phase. No choice is made here.
+
+### 12.2 Optional Follow-On Experiments (Not Phase 3A Acceptance)
+
+The following are research questions and decision gates only. None authorizes
+new code, runs, datasets, configuration, or numerical claims under this plan.
+Each requires separate scope and approval before implementation.
+
+| Follow-on question and purpose | Added assumptions | Key validation gate | Approval status |
+|---|---|---|---|
+| **Out-of-sample alpha validation:** select alpha on one contiguous calibration interval and evaluate it unchanged on a later non-overlapping interval. | A complete compatible cohort and enough observations exist; temporal leakage is prevented. If not, report the limitation. | Prespecified split, unchanged algorithms/alpha, fresh correctness oracle and comparable controls. | Not approved; not run. |
+| **Threshold sensitivity:** compare this retrospective P90 with independently justified alternatives or a calibration/evaluation split. | Each alternative has an external rationale or independent calibration population. | Prespecify thresholds and rerun all comparators under identical population, message, and correctness rules. | Not approved; not run. |
+| **Cohort/time-window robustness:** repeat on another complete cohort or stable interval. | Candidate population has complete observations and is declared a distinct research population. | Validate source freshness, cohort completeness, threshold provenance, controls, and result comparability before interpreting. | Not approved; not run. |
+| **Phase 3B availability robustness:** assess departures, re-entry, denominator changes, coordinator changes, and related traffic. | Explicit online/offline and re-entry state, synchronization, coordinator, and accounting rules. | Independently validate state transitions, oracle correctness, and all message categories under the approved missingness policy. | Optional; not approved or run. |
+| **Multivariate extension:** address the original eight-device environmental-vector objective. | Specify vector components/units, normalization, feasible-region function `f`, cohort/missingness policy, bound or norm, and an oracle before coding; do not stack unscaled variables or assume a Euclidean norm without justification. | Validate source applicability, dimensional assumptions, oracle labels, comparators, cancellation correctness, and full communication accounting. | Original objective remains unresolved and not demonstrated; extension not approved or run. |
+| **Network realism:** consider physical message sizes, latency, hops, delivery faults, or energy only if separately needed. | Define a network model or measurement platform and its operating assumptions. | Validate the new physical measures independently; do not infer them from logical transmission counts. | Not approved; not run. |
+
+Phase 3B availability work remains distinct from the multivariate objective.
+Alternative thresholds, temporal validation, additional populations, and
+network realism likewise remain separate from Phase 3A acceptance.
+
 ---
 
-## 13) Ready-For-Build Checklist
+## 13) Implementation Status And Revalidation Checklist
 
-### Phase 1 / Threshold Ready
+### Phase 1 / Threshold Implementation
 1. Full aligned Phase 1 artifact exists and remains unchanged by the pivot.
 2. Stable cohort and interval are locked: A, C, D, E, F, G; 2022-02-24T18:50:00+00:00 through 2022-03-10T15:53:00+00:00.
 3. Exactly 19,984 complete, consecutive one-minute Phase 3A buckets are verified, with both endpoints inclusive and no timestamp gaps.
 4. Shared preparation computes the full-precision cohort P90 and records its input and producer provenance in downstream evidence.
 
-### Matched Phase 2 Ready
+### Matched Phase 2 Implementation
 1. Existing Phase 2 implementation runs on the Phase 3A subset without code duplication.
 2. It reads the Phase 3A p90.
 3. Membership-change behavior never activates.
 4. Communication totals reconcile.
 5. Result is labeled as the matched Phase 3A Phase 2 baseline.
 
-### Phase 3A Clustering Foundation Ready
+### Phase 3A Clustering Foundation
 1. Existing history, normalization, cluster-quality, and greedy-merge logic is revalidated against hand calculations.
 2. Availability-only complexity is removed or isolated from the Phase 3A execution path.
 3. Production output no longer writes the full sensor-by-minute history trace or exhaustive merge-search records.
 4. Compact clustering-event output is defined and manageable.
 5. Debug tracing is opt-in.
 
-### FMIC Ready
+### FMIC Implementation And Validation
 1. First-moment weights and allowances have direct tests.
 2. Coordinator allowance matches the source rule.
 3. FMIC passes safe/unsafe cancellation, boundary, and communication tests.
 4. FMIC runs end-to-end on the Phase 3A data at the baseline alpha.
 
-### SMIC Ready
+### SMIC Implementation And Validation
 1. First- and second-moment calculations have direct tests.
 2. SMIC reuses the FMIC monitoring architecture.
 3. SMIC passes the same end-to-end correctness gates with only intended algorithm-specific differences.
 
-### Final Phase 3A Comparison Ready
-**Recorded:** US-3.21 and the historical US-3.22 sweep passed; the revised comparison additionally requires Phase 2/C0 equivalence and C0/C1/C2 control gates.
+### Final Phase 3A Comparison Recorded
+US-3.21 and the historical US-3.22 sweep are point-in-time records. The
+revised current comparison and its independent gates are summarized in §7.4
+and bound to the current receipt and run manifest.
 
 1. FMIC and SMIC pass the US-3.21 comprehensive correctness gate.
 2. Compact coarse alpha tuning is complete.
@@ -747,9 +1044,13 @@ Phase 3B is optional and not required for the above checklist. If approved later
 
 ## 14) Historical Implementation Status And Results
 
-**Historical checkpoint:** Work through US-3.22 was recorded on 2026-11-03; US-3.23 is a later addition. The original signed-margin Phase 2 denominator below is historical and does not isolate clustering. See [project history](project_history.md) for the milestone record and later comparability decisions.
+This section preserves point-in-time implementation evidence and results; it
+does not define the current primary comparison. See current controlled results
+in §7.4 and the [project history](project_history.md) for milestone context.
+Work through US-3.22 was recorded on 2026-11-03; US-3.23 and later decisions
+are described in their dated records below.
 
-| User story | Work completed or planned | Status |
+| User story | Historical story objective | Status at recorded checkpoint |
 |---|---|---|
 | US-3.16 | Simplify Phase 3 for the fixed six-sensor cohort; retain signed history and clustering | Implemented and reviewed |
 | US-3.17 | Lock and validate the exact input cohort, interval, and 19,984 complete minute buckets | Implemented and reviewed |
@@ -760,22 +1061,28 @@ Phase 3B is optional and not required for the above checklist. If approved later
 | US-3.22 | Required 19-alpha sensitivity sweep for each algorithm and final matched evaluation | Implemented and passed; 38 full-length runs |
 | US-3.23 | Two-sided equal-allowance Phase 2 policy and separately named matched baseline | Implemented and passed; 103 regression tests |
 
-### 14.1 Prespecified alpha-0.10 comparison
+### 14.1 Historical US-3.22 comparison — different Phase 2 policy; not causal attribution
 
-The historical comparison uses sensors A, C, D, E, F, G; the **19,984-bucket** inclusive interval; full-precision p90 of **22.428666649999997 °C**; the same global boundary convention; and `alpha=0.10` for FMIC/SMIC. Its Phase 2 policy, weighting, and protocol differed, so these reductions do not isolate clustering.
+This historical comparison uses sensors A, C, D, E, F, G; the
+**19,984-bucket** inclusive interval; full-precision p90 of
+**22.428666649999997 °C**; the same global boundary convention; and
+`alpha=0.10` for FMIC/SMIC. Its then-existing Phase 2 policy, weighting, and
+protocol differed. The old 38,087-message denominator and reported percentages
+are preserved as historical records only; they are not current reductions or
+causal estimates of clustering.
 
-| Metric | Matched Phase 2 | FMIC | SMIC |
+| Metric | Historical Phase 2 policy | FMIC | SMIC |
 |---|---:|---:|---:|
 | Total messages | 38,087 | 11,922 | 11,902 |
 | Root synchronizations | 2,107 | 293 | 293 |
 | Actual globally violated minutes | 1,999 | 1,999 | 1,999 |
 | Reported correctness status | Passed | Passed | Passed |
 | Reported false-safe / false-violated states | See baseline correctness fields | 0 / 0 | 0 / 0 |
-| Message reduction vs matched Phase 2 | — | 68.70% | 68.75% |
+| Historical reported reduction vs then-existing Phase 2 | — | 68.70% | 68.75% |
 
 At this one alpha, SMIC uses **20 fewer messages** than FMIC, about **0.17% of FMIC's total**. The difference is 8 node-trigger messages, 6 cluster-check requests, and 6 responses; root-message and coordinator-escalation totals are equal. This is a small dataset-specific difference, not evidence that one method is generally better. The centralized six-sensor-every-minute reference is **119,904** sensor transmissions. Phase 2, FMIC, and SMIC do **not** share identical root synchronization schedules.
 
-### 14.2 US-3.22 alpha sensitivity results
+### 14.2 Historical US-3.22 alpha sensitivity results
 
 The 19 tested alpha values were run independently for each algorithm on the same approved cohort, interval, threshold, and 19,984 buckets. All 38 runs had zero false-safe and false-violated states, `correctness_status=passed`, and exactly reconciled category/message totals. Both message-count curves are irregular across the tested grid.
 
@@ -786,7 +1093,7 @@ The 19 tested alpha values were run independently for each algorithm on the same
 | Root synchronizations, including initialization | 436 | 436 |
 | Mean clusters per synchronization event, including initialization | 5.8005 | 5.8005 |
 | Mean cluster size across all synchronization clusters | 1.0344 | 1.0344 |
-| Reduction vs. matched Phase 2 | 77.10% | 77.11% |
+| Historical reported reduction vs then-existing Phase 2 policy | 77.10% | 77.11% |
 | Reduction vs. 119,904 centralized transmissions | 92.73% | 92.73% |
 
 The 0.65 values are minimum observed on this single dataset and tested grid, not theoretically optimal settings or out-of-sample results. At 0.65 SMIC's two-message advantage comes from two fewer coordinator-to-root escalations. Cluster-size mean is total sensor memberships across all selected partitions at synchronization events divided by total clusters; the initialization partition is included for every method and alpha. Mean cluster count is the arithmetic mean of per-event counts with initialization included.
@@ -823,8 +1130,9 @@ input/config/code hashes, independent root-state correctness, historical
 comparison, and before/after hashes for protected outputs. The notebook's
 general full-data reports use the `phase2_two_sided_*` prefix.
 
-Sections 14.1–14.2 retain the original Phase 2 denominator as a historical
-experiment record. US-3.23 did not isolate weighting or coordinator/cluster
+Sections 14.1–14.2 retain the original Phase 2 denominator and its then-
+reported percentages as historical experiment records only. US-3.23 did not
+isolate weighting or coordinator/cluster
 protocol differences; US-3.24–3.26 subsequently added the equivalence gate,
 controlled comparisons, and validation described in §7.4. These results do not
 evaluate intermittent availability or establish universal superiority.
@@ -838,6 +1146,7 @@ recorded C0/C1/C2 totals of 9,159/8,964/8,962 messages and 467/457/457
 synchronizations. All 38 clustered configurations and three controls passed
 the recorded correctness and accounting checks. At the prespecified 0.10,
 FMIC/SMIC used 11,922/11,902 messages; the exploratory grid minima were
-8,722/8,720 at 0.65 on this dataset. Subsequent workflow consolidation preserved
-the scientific results. See [changelog](CHANGELOG.md) and [current artifact
-documentation](artifacts/README_artifacts.md) for provenance and validation.
+8,722/8,720 at 0.65 on this dataset. The current primary interpretation is in
+§7.4. Subsequent workflow consolidation preserved the scientific results. See
+[changelog](CHANGELOG.md) and [current artifact documentation](artifacts/README_artifacts.md)
+for provenance and validation.

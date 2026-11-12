@@ -139,10 +139,13 @@ inside that isolated copy. Raw data and the Python environment are not bundled.
 
 ## Current Phase 3 workflow
 
-See the [US-3.34 output and operational layout](../scripts/README_scripts.md#us-334-phase3-output-and-operational-layout).
+See the [US-3.34 output and operational layout](../scripts/README_scripts.md#us-334-phase-3-output-and-operational-layout).
 User-facing results are in `phase3_outputs/`; the paired run evidence and retained
 static dependencies are in `phase3_operational/`. `phase3_archive/` is removable
 after the documented archive-absent verification passes.
+The [project plan's controlled-results section](../Distributed_Monitoring_POC_Project_Plan.md#current-phase-3a-controlled-results)
+is the current interpretation of these results and distinguishes them from
+historical comparisons.
 References below to the original production notebook describe historical
 producers, not an active notebook or requirement to recreate old artifacts.
 
@@ -318,7 +321,7 @@ The matched Phase 2 baseline and historical Phase 2-scheduled clustering-event
 artifact are preserved, not replaced by FMIC. Full sensor-minute traces are
 not generated.
 
-See [FMIC usage and methodology](../scripts/README_scripts.md#end-to-end-fmic-us-319)
+See [FMIC usage and methodology](../scripts/README_scripts.md#end-to-end-fmic-and-smic-us-319-us-320)
 for discounted first moments, the labeled project zero-weight fallback,
 both-sides distance monitoring, and separate-root communication accounting.
 
@@ -718,8 +721,8 @@ stated.
 
 ### Active user-facing outputs and operational run files
 
-The final default production has run ID
-`2026-11-11T15:41:05.413521+00:00`. All three result tables and C0 events are
+The current default production has run ID
+`2026-11-12T13:31:38.792440+00:00`. All three result tables and C0 events are
 byte-identical to their pre-cleanup `phase3_current/` counterparts.
 
 | Active path | Meaning and producer / consumer | SHA-256 |
@@ -727,16 +730,18 @@ byte-identical to their pre-cleanup `phase3_current/` counterparts.
 | `phase3_outputs/phase3_results.csv` | 41 user-facing control/clustered result rows; producer `scripts/phase3_implement.py`; readers `scripts/phase3_test.py` and `scripts/phase3_analyze.ipynb` | `8BFE508355FD1DE0254A5F4F17C3B65CA4E94B57ED99D7F16C79BAFE9D3B9BEF` |
 | `phase3_outputs/phase3_cluster_sizes.csv` | 246 diagnostic size-bin rows, including zero bins; producer `scripts/phase3_implement.py`; readers test and analysis | `2F0CF6EDB96904DD986D2345D610CB481B6A8EA0C7761158638786BA159B4AC2` |
 | `phase3_outputs/phase3_snapshots.csv` | 2,372 selected synchronization snapshots; producer `scripts/phase3_implement.py`; readers test and analysis | `B9C2C65B0EBB25BA960E8CF668F141B08E10B4BBD618E0A0DA1023B19A00AC6C` |
-| `phase3_outputs/phase3_summary.json` | Schema-version-1 user-readable comparison summary; producer `scripts/phase3_implement.py`; read-only analysis and saved verification | `BD29E231CC53D8FCB146A4564EF937C8C4146CF497C4529BA7340E7F53BE09D5` |
-| `phase3_operational/phase3_run.json` | Schema-version-2 manifest with status/failure state, completion, provenance and hash inventory; written last by the producer; validated by tests and analysis | `2C86EFE51699C5F03BDE801218C9749C5320B33403E979F42E68063544AD0161` |
+| `phase3_outputs/phase3_summary.json` | Schema-version-1 user-readable comparison summary; producer `scripts/phase3_implement.py`; read-only analysis and saved verification | `D7B2393AACB4716A356D384636F226AFFC4B6F00038B6567AB1D86D5329488C0` |
+| `phase3_operational/phase3_run.json` | Schema-version-2 manifest with status/failure state, completion, provenance and hash inventory; written last by the producer; validated by tests and analysis | `3AC00CC64B2BA60A469F9B6DD2ECB4E52D327C698559C177531E950A7DFD9BA6` |
 | `phase3_operational/phase3_equivalence_events.csv` | 467 complete C0 initialization/root-sync events; producer reuses the validated reference; checked by tests/manifest and not substituted for snapshots | `FF4A89ECEC934A96456EEEFA5E154B580B6DDAC2251EF2711250380F2D489FCF` |
-| `phase3_operational/phase3_validation.json` | Fresh, independent schema-version-2 receipt for 166 tests and the Phase 1/Phase 2 suites; producer `scripts/phase3_test.py`; hash-referenced by summary and manifest | `190F120D134FB25F6FF98A66E3301004B6DC83663F054C686E49F8C4D5ADF538` |
+| `phase3_operational/phase3_validation.json` | Fresh, independent schema-version-2 receipt for 170 tests, including the Phase 1/Phase 2 suites; producer `scripts/phase3_test.py`; hash-referenced by the summary | `AE8D09D951D0F7641B298658917E50066A6130C2CC7A25B605D8B9C3607E3F19` |
 
 The manifest hashes the three result CSVs, summary, and C0 events. The summary
-points to the independent receipt by relative path and SHA-256. Every paired
-file carries the same run ID; missing, stale, failed, or mixed-run state is
-rejected. The independently executed receipt replaces the archived receipt;
-the old receipt was not edited or reused for the changed code and paths.
+points to the independent receipt by relative path and SHA-256; the receipt's
+SHA-256 is `AE8D09D951D0F7641B298658917E50066A6130C2CC7A25B605D8B9C3607E3F19`.
+Every paired file carries the same run ID; missing, stale, failed, or mixed-run
+state is rejected. The read-only saved-results loader passed for this run and
+its bound evidence. The independently executed receipt replaces the archived
+receipt; the old receipt was not edited or reused for the changed code and paths.
 
 ### Operational references copied from root-level originals
 

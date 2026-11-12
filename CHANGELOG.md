@@ -12,6 +12,24 @@ The untouched pre-normalization baseline (`US-0.01_original.md`) and entry-by-en
 
 ## 2026-11-12
 
+### Clarified US-0.03 source paths and baseline safeguards
+- **Context / trigger:** Review of US-0.03 identified source-PDF basenames that do not match the files in `Writing/Motivation/`, an ambiguous stop condition for the story's own existing ID, and a need to distinguish pre-existing worktree changes from this story's work.
+- **Decision / change:** Updated US-0.03 to name the source files currently present under `Writing/Motivation/`, require identity verification of the original work-statement PDF, define duplicate/conflicting story IDs as the stop condition, and preserve pre-existing modified, untracked, and ignored files through baseline and validation checks.
+- **Rationale:** Ensures source citations and story identity checks are actionable while protecting unrelated or pre-existing repository state.
+- **Outcome / impact:** Documentation-only clarification to US-0.03 and its stop/go procedure; no scientific code, configuration, data, or result artifacts were changed.
+- **Evidence / validation:** Confirmed the source PDF basenames with a read-only directory listing and checked the pre-existing version-control status. `git diff --check` was run; no runtime or scientific validation was performed.
+- **Affected files / artifacts:** `User Stories/US-0.03_reconcile_project_plan_source_alignment_and_results.md`, `CHANGELOG.md`.
+- **Related work:** US-0.03.
+
+### Reconciled the project plan with current sources and saved results (US-0.03)
+- **Context / trigger:** The governing plan needed to distinguish completed Phase 3A findings from historical comparisons and the broader, still-unfulfilled POC objective, and to align source attribution and active artifact references with the current workspace.
+- **Decision / change:** Updated the plan with dated implementation/evidence status, a source-to-implementation crosswalk, the current matched Phase 2/C0 and controlled-results comparison, message-category and pathway breakdowns, explicit P90 and sampled-state/detection-delay limits, canonical Phase 2 evidence references, and a bounded optional-research roadmap. Updated the artifact and script READMEs and Phase 3 analysis-notebook Markdown where current guidance required alignment, including repairing broken active Phase 3 section anchors.
+- **Rationale:** Keeps the plan's interpretation tied to the saved matched experiment, separates weighting from clustering contrasts, labels project adaptations and historical evidence, and avoids treating temperature-only results as completion of the original multivariate or event-level delay requirements.
+- **Outcome / impact:** Documentation and notebook narrative only; no scientific implementation, configuration, input data, saved results, or validation receipts were changed. Pre-existing changes to `scripts/shared_monitoring_engine.py` and untracked Phase 1/2 outputs and `config/` were preserved. No new experiments or production runs were performed.
+- **Evidence / validation:** Verified the definitive chapter, intended six-page work statement, supplementary slides, and scoped requirements; reconciled the 41 saved Phase 3 configurations and displayed message/synchronization totals, percentage changes, correctness fields, and singleton-event share against saved results; confirmed current Phase 1/2/3 receipts record 77/49/170 passing tests and the read-only Phase 3 saved-results loader passed. Current source/artifact paths were present, and 29 Markdown anchors in the changed documents resolved after repair; absent archival paths remain historical references, not active inputs. Notebook JSON parsed successfully, and its code cells and saved outputs match `HEAD`; `git diff --check` passed. Full production and test-suite reruns were intentionally omitted.
+- **Affected files / artifacts:** `Distributed_Monitoring_POC_Project_Plan.md`, `artifacts/README_artifacts.md`, `scripts/README_scripts.md`, `scripts/phase3_analyze.ipynb`, `CHANGELOG.md`.
+- **Related work:** US-0.03; US-3.23 through US-3.26.
+
 ### Consolidated project history and updated the current plan (US-0.02)
 - **Context / trigger:** Major project decisions, pivots, discussions, and transformation run evidence were spread across the Phase 3A pivot plan and three Git-ignored documents; the project plan still assigned the pivot a governing role.
 - **Decision / change:** Updated the project plan first to incorporate applicable pivot requirements and later comparability decisions, then created `project_history.md` with a narrative and complete original source records. Removed the four superseded source files after verifying their preserved copies and history content, and updated current navigation and historical run-record references.

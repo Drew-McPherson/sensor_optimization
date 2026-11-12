@@ -1,0 +1,148 @@
+{
+  "experiment_name": "phase3a_stable_cohort",
+  "input_source": "artifacts/phase1_operational/phase1_aligned_temperature.csv",
+  "selected_sensor_ids": [
+    "A",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G"
+  ],
+  "start_timestamp_utc": "2022-02-24T18:50:00+00:00",
+  "end_timestamp_utc": "2022-03-10T15:53:00+00:00",
+  "endpoint_convention": "inclusive",
+  "boundary_convention": {
+    "safe_when": "metric < threshold",
+    "violated_when": "metric >= threshold"
+  },
+  "story": "US-3.23",
+  "algorithm": "phase2",
+  "threshold_policy": "two_sided_absolute_distance_equal_allowances",
+  "threshold_source_series": "phase3a_stable_cohort",
+  "monitoring_preparation": {
+    "schema_version": 1,
+    "source_series": "phase3a_stable_cohort",
+    "statistic": "p90",
+    "p90_value": 22.428666649999997,
+    "statistics": {
+      "series_name": "phase3a_stable_cohort",
+      "source_column": "phase3a_six_sensor_average",
+      "confidence_filter": "all_valid_phase3a_interval_buckets",
+      "filtered_snapshot_count": 19984,
+      "non_null_value_count": 19984,
+      "mean": 20.944819,
+      "std_dev": 1.094391,
+      "p05": 19.238459,
+      "p10": 19.64025,
+      "p15": 19.8425,
+      "p20": 19.991333,
+      "p25": 20.131666,
+      "p30": 20.278333,
+      "p35": 20.428333,
+      "p40": 20.572667,
+      "p45": 20.725,
+      "p50": 20.892083,
+      "p55": 21.053041,
+      "p60": 21.214167,
+      "p65": 21.373333,
+      "p70": 21.48425,
+      "p75": 21.634167,
+      "p80": 21.856666,
+      "p85": 22.055833,
+      "p90": 22.428666649999997,
+      "p95": 22.953208
+    },
+    "population": {
+      "input_source": "artifacts/phase1_operational/phase1_aligned_temperature.csv",
+      "selected_sensor_ids": [
+        "A",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
+      ],
+      "selected_sensor_temperature_columns": [
+        "A_temperature",
+        "C_temperature",
+        "D_temperature",
+        "E_temperature",
+        "F_temperature",
+        "G_temperature"
+      ],
+      "start_timestamp_utc": "2022-02-24T18:50:00+00:00",
+      "end_timestamp_utc": "2022-03-10T15:53:00+00:00",
+      "endpoint_convention": "inclusive",
+      "expected_bucket_count": 19984,
+      "expected_elapsed_minutes": 19983,
+      "sampling_interval_seconds": 60
+    },
+    "provenance": {
+      "input_sha256": "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b",
+      "config_sha256": "a1d5ef4f8bd3e07220e78533c8bf3c63ad219f43dda9f3f2e60242ba6a4a3fc9",
+      "producer_sha256": "e65ca021c649caedebaf948553aa08de7fada0c129354255143343943e047f0b",
+      "publication_sha256": "95ca050fb6f35a0b3c6b37c0f0dbbfe3bb3a499496573d124d8b2bc897545eed"
+    }
+  },
+  "threshold_statistic": "p90",
+  "threshold_value": 22.428666649999997,
+  "bucket_count": 19984,
+  "global_threshold_violation_count": 1999,
+  "false_safe_count": 0,
+  "false_violated_count": 0,
+  "root_state_not_evaluable_count": 0,
+  "root_state_evaluation_count": 19984,
+  "correctness_status": "passed",
+  "message_category_totals": {
+    "trigger_message_count": 753,
+    "request_message_count": 2802,
+    "response_message_count": 2802,
+    "broadcast_message_count": 2802
+  },
+  "total_messages": 9159,
+  "message_counts_reconcile": true,
+  "resynchronization_count": 467,
+  "initialization_count": 1,
+  "monitoring_triggered_synchronization_count": 466,
+  "local_trigger_transmission_count": 753,
+  "membership_change_event_count": 0,
+  "membership_triggered_synchronization_count": 0,
+  "centralized_sensor_transmission_reference": 119904,
+  "events_artifact": "../phase2_operational/phase2_events.csv",
+  "events_sha256": "446d2e0b552ba603a0815e3275f5eba37513ac3298a63fb5129029dc3fba1d2e",
+  "historical_comparison": {
+    "artifact": "phase3a_phase2_baseline.json",
+    "policy": "historical_signed_margin_one_sided_trigger_negative_margin_scheduling",
+    "total_messages": 38087,
+    "resynchronization_count": 2107,
+    "message_category_totals": {
+      "trigger_message_count": 161,
+      "request_message_count": 12642,
+      "response_message_count": 12642,
+      "broadcast_message_count": 12642
+    },
+    "revised_minus_historical_messages": -28928,
+    "revised_minus_historical_synchronizations": -1640,
+    "interpretation": "Policy-change comparison only. Synchronization schedules and absolute triggers both change; no causal split is inferred from aggregate differences."
+  },
+  "provenance": {
+    "input_sha256": "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b",
+    "preparation_sha256": "e3b241e032a88c8ef4691a3dee3e31c2e3a32d2b2b787d8c8a7bd29ef9b1029e",
+    "config_sha256": "a1d5ef4f8bd3e07220e78533c8bf3c63ad219f43dda9f3f2e60242ba6a4a3fc9",
+    "code_sha256": "e65ca021c649caedebaf948553aa08de7fada0c129354255143343943e047f0b",
+    "historical_baseline_sha256": "4fca257e651000433caaa7b83e70b0f10ca32f77b0840e896479eeb7bc5c2127",
+    "artifact_writer_sha256": "e65ca021c649caedebaf948553aa08de7fada0c129354255143343943e047f0b"
+  },
+  "validation_commands": [
+    "python -B -m scripts.shared_monitoring_engine validate"
+  ],
+  "limitations": [
+    "Sampled-bucket root-known-state correctness; no between-bucket or individual-sensor guarantee.",
+    "Single fixed six-sensor dataset; faithful message delivery and complete usable observations assumed.",
+    "Any comparison with existing FMIC/SMIC results is preliminary: moment weighting and coordinator/cluster protocol effects remain uncontrolled.",
+    "Historical Phase 2 and published US-3.22 results are not updated or relabeled."
+  ],
+  "schema_version": 1,
+  "validation_artifact": "../phase2_operational/phase2_validation.json"
+}

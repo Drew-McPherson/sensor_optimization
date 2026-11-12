@@ -1,0 +1,85 @@
+version: 1
+project_name: distributed_monitoring_sensor_poc
+
+global:
+  timezone: UTC
+  bucket_size_seconds: 60
+  min_devices_per_snapshot: 6
+  drop_snapshot_if_stale_over_threshold: true
+
+phase1:
+  stale_threshold_seconds: 120
+
+quality_gates:
+  schema_validity_min_percent: 100
+  duplicate_key_rate_max_percent: 0.5
+  stale_snapshot_rate_max_percent: 10
+  device_coverage_min_percent: 90
+
+confidence_scoring:
+  completeness_weight: 0.7
+  freshness_weight: 0.3
+  formula: "confidence = 0.7 * completeness_component + 0.3 * freshness_component"
+
+summary_statistics:
+  confidence_threshold: 0.75
+  percentiles:
+    - 5
+    - 10
+    - 15
+    - 20
+    - 25
+    - 30
+    - 35
+    - 40
+    - 45
+    - 50
+    - 55
+    - 60
+    - 65
+    - 70
+    - 75
+    - 80
+    - 85
+    - 90
+    - 95
+
+artifacts:
+  raw_index: artifacts/phase1_operational/phase1_source_inventory.csv
+  phase1_aligned: artifacts/phase1_operational/phase1_aligned_temperature.csv
+
+phase3a_experiment:
+  experiment_name: phase3a_stable_cohort
+  input_source: artifacts/phase1_operational/phase1_aligned_temperature.csv
+  selected_sensor_ids:
+    - A
+    - C
+    - D
+    - E
+    - F
+    - G
+  selected_sensor_temperature_columns:
+    - A_temperature
+    - C_temperature
+    - D_temperature
+    - E_temperature
+    - F_temperature
+    - G_temperature
+  start_timestamp_utc: "2022-02-24T18:50:00+00:00"
+  end_timestamp_utc: "2022-03-10T15:53:00+00:00"
+  endpoint_convention: inclusive
+  expected_bucket_count: 19984
+  expected_elapsed_minutes: 19983
+  sampling_interval_seconds: 60
+  stable_cohort_required: true
+  missing_value_policy: fail
+  imputation_policy: none
+  baseline_alpha: 0.1
+  threshold:
+    source_series: phase3a_stable_cohort
+    status: derived_from_aligned_input
+    statistic: p90
+    production_script: scripts/shared_monitoring_engine.py
+  boundary_convention:
+    safe_when: metric < threshold
+    violated_when: metric >= threshold
