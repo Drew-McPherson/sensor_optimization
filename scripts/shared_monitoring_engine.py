@@ -1,4 +1,32 @@
-"""Shared two-sided monitoring engine and Phase 2 artifact contract."""
+"""Shared preparation, monitoring, and artifact validation for Phase 2.
+
+The engine loads the canonical project configuration and validates the fixed
+A/C/D/E/F/G cohort against aligned Phase 1 temperature observations. It derives
+the cohort's empirical, full-precision P90 with source-provenance checks; the
+threshold is run evidence, not a configured safety limit.
+
+For each fixed UTC one-minute bucket, the event-driven monitor compares every
+sensor's current value with that sensor's value at its last completed
+synchronization. Its local trigger is ``abs(deviation) >= allowance``. The root
+is a separate component; SAFE means the synchronized global mean is strictly
+below P90, while VIOLATED includes equality or a value above P90. Initialization,
+membership changes, and local triggers can cause a synchronization, but these
+causes are distinct from a true global threshold violation.
+
+The reusable trace also supports changing sensor availability, although the
+matched production experiment requires all six readings at every bucket. An
+offline oracle evaluates the observed mean at each bucket to compare with the
+root's last-known state; that truth is not supplied to the root's decisions.
+Production artifacts contain a compact summary and completed-synchronization
+events rather than the full per-minute trace.
+
+``publish`` writes the canonical Phase 2 events and linked summary;
+``validate`` runs shared regressions and isolated reproduction before writing
+the separate independent receipt. ``load_validated`` checks that receipt and
+the source/output hashes are current. The module also provides preparation
+used by Phase 1 and Phase 3 consumers. It models logical messages, not physical
+network transport, and it does not implement Phase 3 clustering.
+"""
 
 from __future__ import annotations
 
@@ -27,7 +55,12 @@ PHASE3A_CONFIG_SECTION = "phase3a_experiment"
 
 
 def load_project_config(root: Path) -> dict[str, Any]:
-    """Load the single canonical project configuration."""
+    """Load and return the canonical YAML project configuration.
+
+    ``root`` is resolved before opening ``config/project_config.yaml``. The YAML
+    document must be a mapping; file and YAML parsing errors propagate, while a
+    non-mapping document raises ``ValueError``.
+    """
     config_path = root.resolve() / PROJECT_CONFIG_PATH
     with config_path.open(encoding="utf-8") as stream:
         config = yaml.safe_load(stream)
@@ -37,7 +70,12 @@ def load_project_config(root: Path) -> dict[str, Any]:
 
 
 def load_phase3a_config(root: Path) -> dict[str, Any]:
-    """Load the Phase 3A experiment section from the canonical configuration."""
+    """Return the fixed Phase 3A experiment mapping from canonical config.
+
+    This selects ``phase3a_experiment`` rather than loading general Phase 1
+    settings. A missing section or a value that is not a mapping raises
+    ``ValueError``.
+    """
     config = load_project_config(root)
     experiment = config.get(PHASE3A_CONFIG_SECTION)
     if not isinstance(experiment, dict):
@@ -48,7 +86,12 @@ def load_phase3a_config(root: Path) -> dict[str, Any]:
 
 
 def _safe_numeric(v: Any) -> Optional[float]:
-    """Best-effort numeric conversion for mixed row values."""
+    """Convert a mixed CSV value to ``float`` or return ``None``.
+
+    Empty values and values that ``float`` cannot parse become ``None``. This
+    permissive conversion does not reject infinities or validate sensor
+    completeness; callers apply those checks for their own input contract.
+    """
     if v is None or v == "":
         return None
     try:
@@ -58,9 +101,12 @@ def _safe_numeric(v: Any) -> Optional[float]:
 
 
 def _percentile_linear(sorted_values: List[float], p: int) -> Optional[float]:
-    """
-    Compute percentile using linear interpolation between nearest ranks.
-    p is expected in [0, 100].
+    """Return the percentile interpolated between adjacent sorted ranks.
+
+    ``sorted_values`` must already be ordered. The rank position is
+    ``p / 100 * (n - 1)`` and fractional positions are linearly interpolated;
+    values at or beyond the endpoints return the minimum or maximum. Empty
+    input returns ``None``.
     """
     if not sorted_values:
         return None
@@ -85,7 +131,14 @@ def build_phase3a_average_values(
     aligned_rows: List[Dict[str, Any]],
     experiment_config: Dict[str, Any],
 ) -> List[float]:
-    """Validate the interval and compute its fixed six-sensor means."""
+    """Validate the locked interval and compute six-sensor means in Celsius.
+
+    Rows are selected between the timezone-aware, inclusive UTC endpoints and
+    must provide exactly the configured bucket count, unique increasing
+    timestamps, matching integer epochs, and a 60-second cadence. Every
+    approved sensor must have a finite reading at every selected bucket;
+    missing or invalid values are rejected rather than imputed.
+    """
     sensor_ids = tuple(experiment_config.get("selected_sensor_ids", ()))
     if sensor_ids != PHASE3A_APPROVED_SENSOR_IDS:
         raise ValueError("Phase 3A cohort must remain exactly A, C, D, E, F, and G.")
@@ -187,7 +240,13 @@ def build_phase3a_average_statistics_row(
     average_values: List[float],
     percentiles: List[int],
 ) -> Dict[str, Any]:
-    """Build the Phase 3A statistics row, retaining full precision for P90."""
+    """Build the cohort statistics row used to retain the derived P90.
+
+    The returned mapping describes the six-sensor mean population. Mean,
+    sample standard deviation, and percentiles other than P90 are rounded to
+    six decimals; P90 retains full precision for monitoring decisions.
+    Empty/non-finite values or a percentile list without 90 raise ``ValueError``.
+    """
     if not average_values or 90 not in percentiles:
         raise ValueError("Phase 3A statistics require values and configured P90.")
     if any(not math.isfinite(value) for value in average_values):
@@ -218,7 +277,13 @@ def build_phase3a_average_statistics_row(
 
 
 def load_phase1_definitions(root: Path, *, audit: bool = False) -> ModuleType:
-    """Load only explicitly tagged definitions, never notebook execution cells."""
+    """Load definitions from the uniquely tagged Phase 1 notebook cell.
+
+    Only the ``phase1-core`` or, when ``audit`` is true, ``phase1-audit`` code
+    cell is compiled into a module; notebook execution cells are not run. The
+    tag and single-code-cell contract is required. Audit loading also exposes
+    the audit-specific source discovery function under its expected name.
+    """
     path = root.resolve() / "scripts" / "phase1_implement.ipynb"
     notebook = json.loads(path.read_text(encoding="utf-8"))
     tag = "phase1-audit" if audit else "phase1-core"
@@ -234,6 +299,13 @@ def load_phase1_definitions(root: Path, *, audit: bool = False) -> ModuleType:
 
 
 def validate_preparation_policy(config: dict) -> None:
+    """Require configuration to identify a derived, shared-engine P90 policy.
+
+    The threshold section must name the stable-cohort P90 preparation contract
+    and must not contain a baked-in P90 value or statistics artifact path.
+    Violations raise ``ValueError`` so configuration cannot silently replace
+    data-derived run evidence.
+    """
     threshold = config.get("threshold")
     if not isinstance(threshold, dict) or any(threshold.get(key) != value for key, value in {
         "source_series": "phase3a_stable_cohort", "statistic": "p90",
@@ -246,7 +318,12 @@ def validate_preparation_policy(config: dict) -> None:
 
 
 def historical_input_matches(root: Path, historical: str, current: str) -> bool:
-    """Recognize the unchanged pre-cutover reference only for identical input bytes."""
+    """Match current input paths, allowing one byte-verified historical alias.
+
+    Identical path strings match directly. The retired aligned-input path is
+    accepted only against the current operational path and its recorded SHA-256;
+    no other path migration is treated as equivalent.
+    """
     if historical == current:
         return True
     return (
@@ -257,7 +334,14 @@ def historical_input_matches(root: Path, historical: str, current: str) -> bool:
 
 
 def prepare_monitoring(root: Path) -> dict:
-    """Derive cohort statistics without writing configuration or artifacts."""
+    """Validate Phase 1 evidence and derive the stable-cohort P90 preparation.
+
+    The returned mapping contains the full-precision six-sensor P90, population
+    settings, and hashes for the aligned input, configuration, Phase 1 producer,
+    and publication record. The producer must be complete and current. This
+    function reads but does not modify configuration or artifacts; invalid or
+    stale evidence raises an error.
+    """
     root = root.resolve()
     config_path = root / PROJECT_CONFIG_PATH
     config = load_phase3a_config(root)
@@ -297,14 +381,32 @@ def prepare_monitoring(root: Path) -> dict:
 
 
 def preparation_fingerprint(preparation: dict) -> str:
+    """Return a stable SHA-256 identity for serialized preparation evidence.
+
+    Keys are sorted and JSON separators are fixed so equivalent evidence has
+    the same digest. Non-JSON or non-finite values are rejected; the digest
+    identifies exact serialized preparation, not its scientific validity.
+    """
     return hashlib.sha256(json.dumps(preparation, sort_keys=True, allow_nan=False, separators=(",", ":")).encode()).hexdigest()
 
 
 def validate_monitoring_preparation(root: Path, saved: dict) -> None:
+    """Reject preparation evidence that differs from a fresh current derivation.
+
+    This recomputes the configuration, producer, publication, aligned-input,
+    and cohort-statistics evidence through ``prepare_monitoring``. It performs
+    no writes and raises ``ValueError`` when the saved mapping differs; file,
+    YAML, or preparation errors from the fresh derivation propagate.
+    """
     if saved != prepare_monitoring(root):
         raise ValueError("Saved monitoring preparation is stale or inconsistent with current inputs/code.")
 
 
+# UTC minute buckets; the root is separate from sensor nodes. SAFE is mean < P90,
+# while VIOLATED is mean >= P90. Local triggers use absolute per-sensor deviation
+# from each sensor's last synchronized value and fire at abs(deviation) >= allowance.
+# A trigger is not itself a root synchronization or a global threshold violation.
+# Logical trigger, request, response, and state-update messages are counted separately.
 POLICY_ID = "two_sided_absolute_distance_equal_allowances"
 
 
@@ -314,7 +416,14 @@ def evaluate_root_states(
     sensor_columns: list[str],
     threshold: float,
 ) -> pd.DataFrame:
-    """Offline oracle; never supplies state or decisions to the monitor."""
+    """Label each sampled bucket from observations and compare root-known state.
+
+    The oracle computes the observed mean over available sensors and applies
+    ``mean >= threshold``; it does not supply truth to the trace builder or root.
+    The returned frame contains the oracle label plus false-safe, false-violated,
+    and not-evaluable indicators aligned to ``rows``. It evaluates sampled
+    buckets only and does not establish between-bucket or network-failure behavior.
+    """
     if len(rows) != len(observations):
         raise ValueError("Oracle trace length does not match observations.")
     truth = []
@@ -338,6 +447,13 @@ def evaluate_root_states(
 
 
 def root_correctness_summary(rows: pd.DataFrame) -> dict:
+    """Aggregate sampled-bucket oracle disagreements into the correctness gate.
+
+    Returns false-safe, false-violated, unevaluable, and evaluated counts plus
+    ``correctness_status``. Passing requires at least one evaluable bucket and
+    zero disagreements or unevaluable root states; the result is not a
+    deployment or between-bucket guarantee.
+    """
     false_safe = int(rows["false_safe"].sum())
     false_violated = int(rows["false_violated"].sum())
     unknown = int(rows["root_state_not_evaluable"].sum())
@@ -352,7 +468,12 @@ def root_correctness_summary(rows: pd.DataFrame) -> dict:
 
 
 def normalize_phase2_readings(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
-    """Preserve missing observations, rejecting malformed/non-finite readings."""
+    """Return a copy with selected sensor columns numeric and finite-or-missing.
+
+    Genuine missing observations remain missing for the availability-aware
+    trace. Non-numeric non-missing values and positive or negative infinity
+    raise ``ValueError`` with the first affected bucket; this does not impute data.
+    """
     normalized = frame.copy()
     for column in columns:
         values = frame[column]
@@ -376,6 +497,34 @@ def build_phase2_trace(
     *,
     round_output: bool = True,
 ) -> pd.DataFrame:
+    """Build and self-check the event-driven trace for ordered minute buckets.
+
+    ``frame`` supplies unique increasing bucket epochs, timestamps, and one
+    column per sensor; missing readings represent unavailable sensors.
+    ``threshold`` is a finite temperature in Celsius. Each sensor's entry
+    reference is its own last synchronized reading, and its allowance is the
+    absolute distance between the synchronized global mean and the threshold.
+    A local trigger occurs when the absolute signed deviation is greater than
+    or equal to that allowance, including equality and a zero allowance.
+
+    The root state remains undefined until a usable synchronization initializes
+    it. Initialization, membership changes, and deferred causes force one combined
+    synchronization and suppress trigger notifications. A bucket with no
+    observations defers pending causes without transmissions. On a completed
+    synchronization, the current observed mean sets the root-known SAFE/VIOLATED
+    label and refreshes the per-sensor references and allowances for the next
+    bucket. The true bucket mean is separately evaluated by the offline oracle;
+    it is not an implicit decision input to the root.
+
+    The returned frame contains one row per input bucket, observation and
+    transition fields, per-sensor details, oracle comparisons, and logical
+    message counts. Trigger notifications, root requests, responses, and state
+    updates are separate transmission categories; cause-attribution counters
+    can overlap and are not additive categories. State decisions use unrounded
+    values; ``round_output`` controls only whether reported numeric fields are
+    rounded to four decimals after invariant checks. Invalid inputs or an
+    inconsistent reconstructed trace raise ``ValueError``.
+    """
     if not isinstance(round_output, bool):
         raise ValueError("round_output must be a boolean.")
     if frame.empty or not sensor_columns:
@@ -396,9 +545,11 @@ def build_phase2_trace(
                 raise ValueError(f"Non-finite sensor reading in {column}.")
 
     def reported(value: float) -> float:
+        """Convert non-finite internal state to NaN for trace reporting."""
         return value if math.isfinite(value) else float("nan")
 
     def names(columns: set[str]) -> str:
+        """Format a sensor-column set as a stable, sorted pipe-delimited ID list."""
         return "|".join(sorted(column.removesuffix("_temperature") for column in columns))
 
     reference_mean = float("nan")
@@ -417,6 +568,8 @@ def build_phase2_trace(
 
     for values in frame[required].itertuples(index=False, name=None):
         row = dict(zip(required, values))
+        # References, allowances, and root state enter from the prior completed
+        # synchronization; availability changes are handled by the reusable trace.
         online = {column for column in sensor_columns if pd.notna(row[column])}
         departed = set() if previous_online is None else previous_online - online
         returned = set() if previous_online is None else online - previous_online
@@ -427,6 +580,8 @@ def build_phase2_trace(
             raise ValueError(f"Non-finite Phase 2 mean at bucket {row['bucket_epoch']}.")
         entry_mean = reference_mean
         entry_delta = abs(threshold - entry_mean)
+        # Forced causes take precedence over local notifications; simultaneous
+        # causes still result in at most one collection for this bucket.
         causes = set(pending_causes)
         if not initialized:
             causes.add("initialization")
@@ -445,6 +600,8 @@ def build_phase2_trace(
             margin = margins[column]
             deviation = value - reference
             comparable = column in online and math.isfinite(reference) and math.isfinite(margin)
+            # Compare the signed current-minus-reference deviation by magnitude;
+            # equality triggers, including unchanged values with zero allowance.
             local_violation = comparable and abs(deviation) >= margin
             compared_count += int(comparable)
             local_violation_count += int(local_violation)
@@ -471,6 +628,8 @@ def build_phase2_trace(
         membership_sync = performed and "sensor_membership_changed" in causes
         local_sync = performed and "local_constraint_violation" in causes
         if performed:
+            # The collected readings update root knowledge and per-sensor state
+            # only after this bucket's decisions; the new values apply next row.
             reference_mean = mean
             if not math.isfinite(abs(threshold - mean)):
                 raise ValueError(f"Non-finite root allowance at bucket {row['bucket_epoch']}.")
@@ -489,6 +648,8 @@ def build_phase2_trace(
             pending_causes = set(causes)
         exit_delta = abs(threshold - reference_mean)
         fanout = count if performed else 0
+        # Cause-attribution counters below may overlap; only these four categories
+        # define the transmission total for this bucket.
         total = len(triggering) + 3 * fanout
         violation = int(mean >= threshold) if count else float("nan")
         pending = bool(pending_causes)
@@ -552,6 +713,8 @@ def build_phase2_trace(
         previous_online = online
 
     trace = pd.DataFrame.from_records(records)
+    # This offline truth comparison observes every bucket but never feeds the
+    # distributed root's decisions or message accounting.
     oracle = evaluate_root_states(trace, frame, sensor_columns, threshold)
     trace[oracle.columns] = oracle
     errors = check_trace_invariants(trace, frame, sensor_columns, threshold, rounded=False)
@@ -561,7 +724,12 @@ def build_phase2_trace(
 
 
 def check_membership_invariants(rows: pd.DataFrame) -> list[str]:
-    """Validate both in-memory and CSV-loaded traces without relying on assertions."""
+    """Check availability, forced-sync, and message-reconciliation fields.
+
+    Accepts both in-memory and CSV-loaded trace frames and returns one error
+    string per detected row/field problem instead of relying on assertions.
+    These structural checks do not prove the full monitoring algorithm correct.
+    """
     errors = []
     required = [
         "bucket_epoch",
@@ -588,6 +756,7 @@ def check_membership_invariants(rows: pd.DataFrame) -> list[str]:
     changed = rows["event_membership_changed"].eq(1)
 
     def report_rows(mask: pd.Series, field: str, message: str) -> None:
+        """Append a bucket-specific error for every row selected by ``mask``."""
         for index in rows.index[mask.fillna(True)]:
             bucket = rows.at[index, "bucket_epoch"]
             errors.append(f"bucket {bucket}: {field} {message}")
@@ -642,12 +811,27 @@ def check_membership_invariants(rows: pd.DataFrame) -> list[str]:
 
 
 def _sha256(path: Path) -> str:
+    """Return the SHA-256 digest of a file's exact bytes.
+
+    The digest supports provenance and output-identity checks; it does not assess
+    the scientific meaning or correctness of the file contents.
+    """
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
-    """Run only the locked matched experiment, writing separate compact outputs."""
+    """Run and validate only the locked six-sensor matched Phase 2 experiment.
+
+    The wrapper checks the approved population, interval, preparation evidence,
+    aligned Phase 1 input, and historical baseline before building the full
+    trace, sampled-state oracle, and transmission totals. It returns a compact
+    summary and writes completed-synchronization events plus a summary to the
+    selected destination. The historical comparison is a reference, not the
+    current policy. An explicit ``output_dir`` must be isolated from sources,
+    historical references, and owned production-artifact trees; it is intended
+    for candidate reproduction, not canonical publication.
+    """
     root = root.resolve()
     artifacts = root / "artifacts"
     config_path = root / PROJECT_CONFIG_PATH
@@ -856,13 +1040,17 @@ def check_trace_invariants(
     *,
     rounded: bool = True,
 ) -> list[str]:
-    """Consistency replay of trace fields and transitions from raw observations.
+    """Reconstruct expected transitions and compare them with a saved trace.
 
-    Used before rounding and after CSV export. Replay does not call the production
-    builder or trust its synchronization flags to advance the reference state.
-    It reconstructs substantial monitoring logic, so it is not independent proof
-    of algorithm correctness. The offline root-state oracle and independently
-    specified synthetic fixtures provide complementary correctness checks.
+    The replay derives membership, causes, triggers, synchronization state,
+    labels, and logical message totals from ``observations`` without calling the
+    trace builder or trusting its synchronization flags to advance references.
+    ``rounded`` selects the comparison tolerance for unrounded versus four-place
+    reported numeric fields. The returned list contains field- and bucket-level
+    mismatches and stops after 20 errors. Because substantial algorithm logic is
+    repeated here, this is a complementary consistency check, not independent
+    proof; synthetic regressions and the separately computed root-state oracle
+    provide other evidence.
     """
     errors = check_membership_invariants(rows)
     if "distributed_alert" in rows.columns:
@@ -892,6 +1080,7 @@ def check_trace_invariants(
         bucket = source["bucket_epoch"]
 
         def expect(field: str, expected: str | int | float) -> None:
+            """Record a missing or mismatched field using the replay tolerance."""
             if field not in actual:
                 errors.append(f"bucket {bucket}: missing {field}")
                 return
@@ -910,6 +1099,7 @@ def check_trace_invariants(
                 errors.append(f"bucket {bucket}: {field} expected {expected!r}, got {value!r}")
 
         def ids(columns: set[str]) -> str:
+            """Format sensor columns as the sorted IDs expected in trace fields."""
             return "|".join(sorted(column.removesuffix("_temperature") for column in columns))
 
         online = {column for column in sensor_columns if pd.notna(source[column])}
@@ -1038,11 +1228,18 @@ SOURCES = (
 
 
 def _hash(path: Path) -> str:
+    """Return the SHA-256 digest of exact file bytes for artifact provenance."""
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def _write_atomic(path: Path, data: bytes) -> None:
+    """Replace one file atomically after flushing a same-directory temporary.
+
+    The temporary file is cleaned up on success or failure. Separate calls for
+    the events and summary are not a multi-file transaction, so linked hashes
+    and validation detect an interrupted or mixed publication.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -1058,14 +1255,25 @@ def _write_atomic(path: Path, data: bytes) -> None:
 
 
 def _json_bytes(value: dict) -> bytes:
+    """Serialize a JSON mapping with indentation, a trailing newline, and no NaN.
+
+    Insertion order is preserved; non-finite numeric values are rejected rather
+    than emitted as non-standard JSON.
+    """
     return (json.dumps(value, indent=2, allow_nan=False) + "\n").encode("utf-8")
 
 
 def _source_hashes(root: Path) -> dict[str, str]:
+    """Hash exactly the repository-relative files named by ``SOURCES``.
+
+    The result is a focused freshness contract, not an inventory or audit of
+    every file in the repository.
+    """
     return {name: _hash(root / name) for name in SOURCES}
 
 
 def _owned_path(root: Path, relative: Path) -> Path:
+    """Resolve an owned artifact path and reject symbolic-link locations."""
     path = root / relative
     if path.resolve() != path or path.parent.resolve() != path.parent:
         raise ValueError(f"Phase 2 artifact path must not use a symbolic link: {path}")
@@ -1073,6 +1281,12 @@ def _owned_path(root: Path, relative: Path) -> Path:
 
 
 def _protected_hashes(root: Path) -> dict[str, str]:
+    """Snapshot selected Phase 2/3 artifact trees before validation work.
+
+    The returned relative-path hashes let the validator detect unexpected
+    changes to Phase 3 outputs/operations and protected Phase 2 archive/current
+    evidence. The inventory is limited to these named trees.
+    """
     artifacts = root / "artifacts"
     files = set()
     for folder in ("phase3_outputs", "phase3_operational", "phase2_archive", "phase2_current"):
@@ -1083,6 +1297,13 @@ def _protected_hashes(root: Path) -> dict[str, str]:
 
 
 def _generate(root: Path) -> tuple[dict, bytes]:
+    """Generate an isolated candidate summary and completed-event bytes.
+
+    The candidate writer runs in a temporary directory, so canonical Phase 2
+    outputs are not replaced. The summary is adapted to the production artifact
+    links and current source identity; the tuple is used for publication or
+    byte-for-byte reproduction checks.
+    """
     with tempfile.TemporaryDirectory(prefix="phase2_candidate_") as temporary:
         directory = Path(temporary) / "run"
         summary = run_phase3a_two_sided(root, directory)
@@ -1099,7 +1320,13 @@ def _generate(root: Path) -> tuple[dict, bytes]:
 
 
 def publish(root: Path) -> dict:
-    """Run the matched experiment and publish events before the linked summary."""
+    """Run the matched experiment and publish events, then their linked summary.
+
+    This is a production writer, not a read-only calculation. Each artifact is
+    replaced atomically in sequence, with the event CSV written first and its
+    digest embedded in the summary written second. It does not create or refresh
+    the separate independent validation receipt.
+    """
     root = root.resolve()
     summary, events = _generate(root)
     _write_atomic(_owned_path(root, EVENTS), events)
@@ -1108,7 +1335,13 @@ def publish(root: Path) -> dict:
 
 
 def load_validated(root: Path) -> dict:
-    """Read the current contract and require a matching independent receipt."""
+    """Load current Phase 2 outputs only when their independent receipt is valid.
+
+    Requires the expected summary/events/receipt paths and schema, matching
+    event, summary, and source hashes, a passed nonempty no-skip receipt, and
+    freshly recomputed monitoring preparation. Missing, stale, or inconsistent
+    evidence raises an error; this function does not regenerate outputs.
+    """
     root = root.resolve()
     summary_path, events_path, receipt_path = (_owned_path(root, p) for p in (SUMMARY, EVENTS, RECEIPT))
     for path in (summary_path, events_path, receipt_path):
@@ -1143,7 +1376,15 @@ def load_validated(root: Path) -> dict:
 
 
 def validate(root: Path) -> dict:
-    """Execute regressions and an isolated reproduction, then issue a receipt."""
+    """Run regressions and isolated reproduction before issuing the receipt.
+
+    The function first atomically writes an ``in_progress`` receipt, then runs
+    ``scripts.test_shared_monitoring``, rejects failures, skips, or zero tests,
+    compares isolated candidate outputs with saved artifacts, and verifies that
+    sources and protected files stayed unchanged. Only complete success writes
+    and verifies ``passed``. An exception or interruption can leave the receipt
+    at ``in_progress``; it does not promise a completed ``failed`` receipt.
+    """
     root = root.resolve()
     receipt_path = _owned_path(root, RECEIPT)
     _write_atomic(receipt_path, _json_bytes({"schema_version": 1, "status": "in_progress"}))
@@ -1186,6 +1427,13 @@ def validate(root: Path) -> dict:
 
 
 def main() -> None:
+    """Dispatch the command-line publisher or independent validator.
+
+    With no command, the CLI runs ``publish`` and writes canonical artifacts;
+    ``validate`` writes the independent receipt. ``--output-dir`` is accepted
+    only for isolated publication. The parser description uses this module
+    docstring, so changes here also appear in CLI help.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", nargs="?", choices=("publish", "validate"), default="publish")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])

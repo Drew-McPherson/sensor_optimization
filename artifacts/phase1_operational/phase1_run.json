@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "passed",
   "quality_gates_passed": true,
-  "created_utc": "2026-11-12T13:24:55+00:00",
+  "created_utc": "2026-11-12T15:19:18+00:00",
   "qc": {
     "files_processed": 3471,
     "rows_total": 79274744,
@@ -142,7 +142,7 @@
     "raw_index_sha256": "24b0c814b1382d365ab612c1e1475902cd8632d07b7739e4ee286465de924f93",
     "phase1_aligned_sha256": "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b"
   },
-  "implementation_sha256": "b0da587f756767b4fb9262836e95ec9c2ef63d8fd0fe69f0b76c1bc0bb9828de",
+  "implementation_sha256": "a89942cd84e872815f09fb13034987cf7cdd19c2170e43d0d48b83f1394239ae",
   "config_sha256": "a1d5ef4f8bd3e07220e78533c8bf3c63ad219f43dda9f3f2e60242ba6a4a3fc9",
   "limited_run": false
 }

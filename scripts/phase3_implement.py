@@ -1,7 +1,31 @@
-"""Canonical Phase 3A algorithms and revised controlled experiment.
+"""Run the fixed-cohort Phase 3A distributed-monitoring experiments.
 
-Importing this module does not load inputs or execute experiments.
-Run regression tests separately and supply their current validation record.
+The experiment treats temperature observations from sensors A, C, D, E, F,
+and G as distributed node readings over 19,984 consecutive one-minute buckets.
+The six-sensor mean is compared with the full-precision P90 derived from this
+same validated cohort; it is not a universal safety limit. Temperature is used
+to provide a scalar stream for evaluating the monitoring protocol, not because
+the production sensors themselves implement a distributed temperature network.
+The shared monitoring engine validates preparation and supplies the matched
+Phase 2 contract; Phase 3 owns clustering and FMIC/SMIC simulation.
+
+The module contains separate stages for input/configuration validation,
+signed-history clustering, persistent FMIC/SMIC moment state, node/coordinator/
+root monitoring, communication accounting, offline correctness evaluation,
+independent validation, artifact publication, and saved-result replay. C0, C1,
+and C2 are fixed-singleton controls; FMIC and SMIC each support the 19-value
+alpha grid. Importing the module defines these operations without reading
+production inputs or running an experiment.
+
+Run ``python -m scripts.phase3_implement --help`` for the command-line entry
+point. Production requires a current external validation receipt and writes
+scientific tables to ``artifacts/phase3_outputs/`` and the run manifest,
+equivalence events, and receipt references to ``artifacts/phase3_operational/``.
+The historical ``artifacts/phase3_archive/`` is not a production input. The
+explicit historical-sweep and legacy FMIC/SMIC runners write legacy evidence;
+``--equivalence`` writes an isolated summary/event pair, while ``--replay`` is
+read-only. None of these modes changes the CLI defaults when documentation is
+updated.
 """
 
 from __future__ import annotations
@@ -45,7 +69,12 @@ from scripts.shared_monitoring_engine import (
 
 @dataclass(frozen=True)
 class HistoryNormalizationSnapshot:
-    """One event-level normalization result shared by alpha candidates."""
+    """Immutable raw and normalized signed histories for one sync event.
+
+    The snapshot records eligible sensors, absolute magnitudes, normalization
+    status, and any all-zero singleton fallback. Alpha candidates share it so
+    their comparison uses one identical normalization input.
+    """
 
     eligible_sensor_ids: tuple[str, ...]
     raw_histories: Mapping[str, float]
@@ -62,7 +91,7 @@ class HistoryNormalizationSnapshot:
 
 @dataclass(frozen=True)
 class AlphaClusteringInput:
-    """Per-alpha handoff referencing the shared normalization snapshot."""
+    """Identify one alpha evaluation over a shared synchronization snapshot."""
 
     clustering_event_id: int
     synchronization_id: int
@@ -78,7 +107,14 @@ def normalize_sensor_histories(
     raw_histories: Mapping[str, Real],
     eligible_sensor_ids: Iterable[str],
 ) -> HistoryNormalizationSnapshot:
-    """Normalize eligible scalar histories without mutating persistent state."""
+    """Normalize signed reference-relative histories for one clustering event.
+
+    Eligible finite sensor histories are divided by the largest absolute
+    history, preserving signs so opposing changes can cancel after summation.
+    No persistent monitor state is modified. If all eligible histories are
+    zero, the result records the deterministic singleton fallback instead of
+    dividing by zero; an empty eligible set is deferred.
+    """
     if isinstance(eligible_sensor_ids, str):
         raise ValueError("Provide eligible sensor IDs as an iterable, not a string.")
     eligible_ids = tuple(eligible_sensor_ids)
@@ -162,7 +198,12 @@ def build_alpha_clustering_inputs(
     normalization_snapshot: HistoryNormalizationSnapshot,
     alpha_values: Iterable[Real] = PHASE3A_DEFAULT_ALPHA_VALUES,
 ) -> tuple[AlphaClusteringInput, ...]:
-    """Build selected alpha inputs, sharing one event normalization result."""
+    """Build per-alpha evaluations that share one sync-event normalization.
+
+    ``synchronization_id`` must be positive. Deferred empty snapshots produce
+    no candidates; otherwise each requested alpha references the same immutable
+    snapshot so differences reflect alpha alone.
+    """
     if synchronization_id < 1:
         raise ValueError("Synchronization ID must be positive.")
     if normalization_snapshot.deferred_reason is not None:
@@ -185,6 +226,7 @@ Partition = tuple[Cluster, ...]
 def _validated_clustering_values(
     normalized_histories: Mapping[str, Real], alpha: Real,
 ) -> dict[str, float]:
+    """Validate alpha and finite normalized signed histories before scoring."""
     if isinstance(alpha, bool) or not isinstance(alpha, Real):
         raise ValueError("Alpha must be a finite number in [0, 1].")
     if not math.isfinite(float(alpha)) or not 0 <= alpha <= 1:
@@ -203,6 +245,7 @@ def _validated_clustering_values(
 
 
 def _canonical_cluster(cluster: Iterable[str]) -> Cluster:
+    """Return a sorted, unique cluster or reject malformed sensor membership."""
     if isinstance(cluster, str):
         raise ValueError("A cluster must be an iterable of sensor IDs, not a string.")
     members = tuple(cluster)
@@ -214,13 +257,19 @@ def _canonical_cluster(cluster: Iterable[str]) -> Cluster:
 
 
 def _cluster_quality(cluster: Cluster, values: Mapping[str, float], alpha: float) -> float:
+    """Score signed cancellation plus the alpha-weighted cluster-size cost."""
     return abs(math.fsum(values[sensor_id] for sensor_id in cluster)) / len(cluster) + alpha * len(cluster)
 
 
 def cluster_quality(
     cluster: Iterable[str], normalized_histories: Mapping[str, Real], alpha: Real,
 ) -> float:
-    """Score signed cancellation before applying the scalar absolute value."""
+    """Compute ``abs(sum(signed histories))/size + alpha * size``.
+
+    The absolute value follows the signed sum, allowing opposite sensor changes
+    to cancel. The formula is source-defined; validation and deterministic
+    search/tie behavior are project implementation policies.
+    """
     values = _validated_clustering_values(normalized_histories, alpha)
     members = _canonical_cluster(cluster)
     unknown = sorted(set(members) - set(values))
@@ -232,7 +281,7 @@ def cluster_quality(
 def partition_quality(
     partition: Iterable[Iterable[str]], normalized_histories: Mapping[str, Real], alpha: Real,
 ) -> float:
-    """Score a disjoint partition containing exactly the supplied sensors."""
+    """Sum cluster qualities for a disjoint, complete sensor partition."""
     values = _validated_clustering_values(normalized_histories, alpha)
     clusters = tuple(sorted(_canonical_cluster(cluster) for cluster in partition))
     members = tuple(member for cluster in clusters for member in cluster)
@@ -242,7 +291,14 @@ def partition_quality(
 
 
 def evaluate_alpha_clustering(clustering_input: AlphaClusteringInput) -> dict[str, object] | None:
-    """Retain the greedy candidate sequence and choose its earliest minimum."""
+    """Run the deterministic greedy merge sequence for one alpha.
+
+    At each step the algorithm selects the current worst cluster and pairs it
+    with the partner minimizing merged-cluster quality. It records each
+    partition, stops under the implemented merge criterion, and selects the
+    earliest minimum-quality candidate. This is a greedy search, not a global
+    partition optimizer. Ties follow the canonical sensor/partition ordering.
+    """
     snapshot = clustering_input.normalization_snapshot
     if snapshot.deferred_reason is not None:
         return None
@@ -336,7 +392,14 @@ PHASE3A_BUCKET_SECONDS = 60
 
 
 def validate_phase3a_config(config):
-    """Reject configuration drift from the approved stable-cohort contract."""
+    """Validate the fixed cohort, full-precision P90 policy, and time contract.
+
+    Phase 3A uses sensors A/C/D/E/F/G, both inclusive UTC endpoints,
+    consecutive one-minute buckets, and no missing-value imputation. The
+    threshold is derived from the six-sensor cohort mean; SAFE is strictly
+    below it and VIOLATED includes equality. A resolved run value must retain
+    authoritative shared-engine provenance rather than a rounded config value.
+    """
     if not isinstance(config, dict):
         raise ValueError("Phase 3A experiment configuration must be a mapping.")
     if config.get("input_source") != "artifacts/phase1_operational/phase1_aligned_temperature.csv":
@@ -413,7 +476,13 @@ def validate_phase3a_config(config):
 
 
 def prepare_phase3a_input(source_frame, experiment_config):
-    """Select and validate the approved complete one-minute Phase 3A input."""
+    """Select the locked interval and reject incomplete or misaligned readings.
+
+    The returned frame contains only bucket identity and the six approved
+    temperature columns in time order. Duplicate/gapped timestamps, epoch
+    disagreement, missing/non-finite values, and wrong bucket counts fail
+    rather than being imputed or silently dropped.
+    """
     sensor_ids, sensor_columns, start_time, end_time, expected_bucket_count = (
         validate_phase3a_config(experiment_config)
     )
@@ -491,11 +560,17 @@ def prepare_phase3a_input(source_frame, experiment_config):
 
 
 class Phase3AHistoryTracker:
-    """Track signed accumulated history for an always-present fixed cohort."""
+    """Track discounted signed changes since each sensor's last synchronization.
+
+    The stable cohort remains present throughout the run. History drives
+    clustering and is distinct from the first/second moments used for
+    allowances.
+    """
 
     DISCOUNT = 0.5
 
     def __init__(self, sensor_ids):
+        """Initialize zero histories and unset references for unique sensors."""
         self.sensor_ids = tuple(sensor_ids)
         if not self.sensor_ids or len(set(self.sensor_ids)) != len(self.sensor_ids):
             raise ValueError("Phase 3A sensor IDs must be non-empty and unique.")
@@ -505,6 +580,14 @@ class Phase3AHistoryTracker:
         self.row_number = 0
 
     def step(self, readings, synchronization_causes=()):
+        """Accumulate each signed change and snapshot history at synchronization.
+
+        On the initial row a synchronization cause is required. Later rows
+        discount prior history by one half and add the current reading's
+        difference from the most recent synchronized reference. A sync returns
+        a copy of the pre-reset accumulated history and refreshes references;
+        ordinary rows return ``None`` for the snapshot.
+        """
         if set(readings) != set(self.sensor_ids):
             raise ValueError("Phase 3A readings must contain exactly the fixed cohort.")
         values = {}
@@ -562,6 +645,12 @@ def fmic_allocation(
     partition: Sequence[Sequence[str]],
     root_allowance: float,
 ) -> dict:
+    """Compute FMIC allowance weights from absolute discounted first moments.
+
+    The shared allocator scales nonzero weights to a total of six in Phase 3A,
+    then derives per-node and per-cluster-coordinator allowances from the
+    remaining distance between the synchronized mean and threshold.
+    """
     if not moments or any(
         isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value)
         for value in moments.values()
@@ -580,6 +669,12 @@ def allocate_moment_weights(
     root_allowance: float,
     weight_status: str,
 ) -> dict:
+    """Scale raw weights and derive node and coordinator allowance budgets.
+
+    Equal weights are substituted only when the complete raw-weight sum is
+    zero; individual zero weights remain zero. Each coordinator receives the
+    mean of its cluster members' node allowances.
+    """
     if not weights or any(not math.isfinite(value) or value < 0 for value in weights.values()):
         raise ValueError("Raw moment weights must be nonempty, finite, and nonnegative.")
     if not math.isfinite(root_allowance) or root_allowance < 0:
@@ -622,10 +717,12 @@ class DiscountedFirstMoment:
     """
 
     def __init__(self, sensors: Sequence[str]):
+        """Initialize zero sums and an observation count for the fixed cohort."""
         self.sums = dict.fromkeys(sensors, 0.0)
         self.count = 0
 
     def update(self, readings: Mapping[str, float]) -> None:
+        """Update persistent discounted sums after validating a full reading."""
         if set(readings) != set(self.sums):
             raise ValueError("First moments require the fixed sensor cohort.")
         if any(
@@ -642,6 +739,7 @@ class DiscountedFirstMoment:
             raise ValueError("Discounted first-moment sums overflowed.")
 
     def means(self) -> dict[str, float]:
+        """Return source discounted first moments without modifying the state."""
         return {
             sensor: value / self.count if self.count else 0.0
             for sensor, value in self.sums.items()
@@ -659,10 +757,12 @@ class DiscountedSecondMoment(DiscountedFirstMoment):
     """
 
     def __init__(self, sensors: Sequence[str]):
+        """Initialize zero first moments and second-moment sums per sensor."""
         super().__init__(sensors)
         self.second_moments = dict.fromkeys(self.sums, 0.0)
 
     def update(self, readings: Mapping[str, float]) -> None:
+        """Advance the persistent source first and unnormalized second moments."""
         old_means = self.means()
         old_count = self.count
         super().update(readings)
@@ -682,6 +782,11 @@ def smic_allocation(
     partition: Sequence[Sequence[str]],
     root_allowance: float,
 ) -> dict:
+    """Compute SMIC weights and node/coordinator budgets from both moments.
+
+    SMIC uses the source unnormalized discounted squared-deviation sum; it is
+    not population/sample variance and is not reset at root synchronization.
+    """
     if isinstance(count, bool) or not isinstance(count, int) or count < 0:
         raise ValueError("SMIC observation count must be a nonnegative integer.")
     if not moments or set(moments) != set(second_moments):
@@ -707,10 +812,17 @@ def smic_allocation(
 
 
 class FMICMonitor:
-    """Shared FMIC/SMIC lifecycle; compatibility name, no imported sync schedule.
+    """Simulate persistent FMIC/SMIC node, coordinator, and root state.
 
-    allocation_strategy(moment, partition, root_allowance) optionally injects
-    allocation values for protocol tests; otherwise weight_method selects them.
+    Each bucket uses references, allowances, partition, and root-known state
+    established by the previous synchronization. Signed change histories drive
+    clustering; discounted moments drive allowances, and both persist across
+    ordinary synchronizations. The full-data mean is an offline oracle used
+    only to score sampled-state correctness.
+
+    ``allocation_strategy(moment, partition, root_allowance)`` can supply
+    allocations for protocol tests; otherwise ``weight_method`` selects FMIC
+    or SMIC. Coordinators determine whether a root collection is needed.
     """
 
     def __init__(
@@ -725,6 +837,13 @@ class FMICMonitor:
         raise_on_false_safe: bool = True,
         capture_decisions: bool = False,
     ):
+        """Initialize an empty cohort and its monitoring policies.
+
+        ``threshold`` is the full-precision global boundary and ``alpha``
+        controls greedy clustering. This constructor reads no files and starts
+        no simulation. Decision capture and false-safe raising control evidence
+        collection/reporting, not the information available to the protocol.
+        """
         if weight_method not in ("FMIC", "SMIC"):
             raise ValueError("weight_method must be FMIC or SMIC.")
         self.weight_method = weight_method
@@ -762,6 +881,22 @@ class FMICMonitor:
         self.false_violated = 0
 
     def step(self, readings: Mapping[str, float], timestamp: str, epoch: int) -> dict:
+        """Process one complete bucket and return its entry/post-sync trace.
+
+        Node checks use the entry reference and allowance with an inclusive
+        absolute-deviation boundary. Coordinators collect only peer readings
+        not already reported by triggers, test signed cluster change, and
+        escalate when the local check is inconclusive. A root sync collects all
+        sensors once, establishes root-known state, refreshes references,
+        allowances, and clusters, then activates that state on the next bucket.
+        Offline truth does not drive node or coordinator decisions.
+
+        The trace distinguishes node triggers, coordinator check operations,
+        escalation transmissions, root synchronizations, and one-way message
+        categories. Multiple escalations still cause only one root-wide
+        collection; self-messages are excluded. A zero allowance can trigger
+        with an unchanged reading, and this behavior is retained.
+        """
         if set(readings) != set(self.sensors):
             raise ValueError(f"{self.weight_method} readings must contain exactly the fixed cohort.")
         if any(isinstance(value, bool) or not isinstance(value, Real) for value in readings.values()):
@@ -787,6 +922,8 @@ class FMICMonitor:
                 deviations = {
                     sensor: values[sensor] - self.references[sensor] for sensor in cluster
                 }
+                # The inclusive boundary means a zero allowance can trigger
+                # on an unchanged reading; changing it would alter the protocol.
                 triggers = {
                     sensor for sensor in cluster
                     if abs(deviations[sensor]) >= self.allocation["node_allowances"][sensor]
@@ -802,6 +939,8 @@ class FMICMonitor:
                 requested = set(cluster) - triggers - {coordinator}
                 counts["cluster_check_requests"] += len(requested)
                 counts["cluster_check_responses"] += len(requested)
+                # Sum signed changes before taking the magnitude so opposite
+                # movements can cancel within a coordinator's cluster.
                 cluster_change = abs(math.fsum(deviations.values()) / len(cluster))
                 if cluster_change >= self.allocation["coordinator_allowances"][coordinator]:
                     escalation_count += 1
@@ -811,11 +950,13 @@ class FMICMonitor:
             ("coordinator_violation",) if synchronize else ()
         )
         histories, _ = self.history.step(values, synchronization_causes=causes)
+        # Centralized truth is an offline correctness oracle, not a value
+        # available to sensor or coordinator decisions before allowed messages.
         actual_mean = math.fsum(values.values()) / len(values)
         actual_violated = actual_mean >= self.threshold
         if synchronize:
             # The separate root has no sensor readings. Alerts carry no raw
-            # readings; one collection obtains every sensor's state directly.
+            # values, so this single collection obtains every sensor's state.
             counts["root_sync_requests"] = len(self.sensors)
             counts["root_sync_responses"] = len(self.sensors)
             counts["root_state_updates"] = len(self.sensors)
@@ -920,6 +1061,12 @@ class FMICMonitor:
         }
 
     def summary(self) -> dict:
+        """Summarize sampled-state correctness, events, and message counts.
+
+        False-safe and false-violated root states are both errors. Counts
+        describe logical protocol transmissions, not physical network bytes,
+        latency, energy, fault tolerance, or between-bucket detection.
+        """
         if not self.rows:
             raise ValueError(f"Cannot summarize an uninitialized {self.weight_method} monitor.")
         cluster_sizes = [
@@ -965,6 +1112,12 @@ def run_phase3a_fmic(
     prepared_inputs: dict | None = None,
     raise_on_false_safe: bool = True,
 ) -> dict:
+    """Run one FMIC configuration through the common Phase 3A lifecycle.
+
+    The fixed-alpha call may write its compact event CSV and summary to
+    ``output_dir``; ``prepared_inputs`` can reuse validated inputs from the same
+    root without changing the experiment.
+    """
     return run_phase3a_monitoring(
         root, "FMIC", alpha, output_dir, prepared_inputs=prepared_inputs,
         raise_on_false_safe=raise_on_false_safe,
@@ -979,6 +1132,12 @@ def run_phase3a_smic(
     prepared_inputs: dict | None = None,
     raise_on_false_safe: bool = True,
 ) -> dict:
+    """Run one SMIC configuration through the common Phase 3A lifecycle.
+
+    The fixed-alpha call may write its compact event CSV and summary to
+    ``output_dir``; ``prepared_inputs`` can reuse validated inputs from the same
+    root without changing the experiment.
+    """
     return run_phase3a_monitoring(
         root, "SMIC", alpha, output_dir, prepared_inputs=prepared_inputs,
         raise_on_false_safe=raise_on_false_safe,
@@ -986,6 +1145,12 @@ def run_phase3a_smic(
 
 
 def load_phase3a_monitoring_inputs(root: Path) -> dict:
+    """Load the stable-cohort input, derived P90, and matched Phase 2 baseline.
+
+    Preparation validates the full-precision six-sensor mean/P90 contract,
+    interval, complete timestamps/readings, and baseline identity. Missing,
+    stale, malformed, or mismatched prerequisite evidence fails closed.
+    """
     config_path = root / PROJECT_CONFIG_PATH
     config = load_phase3a_config(root)
     sensors, _, _, _, _ = validate_phase3a_config(config)
@@ -1038,6 +1203,11 @@ def run_phase3a_monitoring(
     prepared_inputs: dict | None = None,
     raise_on_false_safe: bool = True,
 ) -> dict:
+    """Simulate one FMIC/SMIC run and publish compact event and summary files.
+
+    Reusable inputs must belong to ``root``. A non-baseline alpha requires an
+    explicit output directory so it cannot replace the canonical reference.
+    """
     if weight_method not in ("FMIC", "SMIC"):
         raise ValueError("weight_method must be FMIC or SMIC.")
     inputs = prepared_inputs or load_phase3a_monitoring_inputs(root)
@@ -1113,6 +1283,7 @@ def run_phase3a_monitoring(
 
 
 def _phase3a_cluster_metrics(events: pd.DataFrame, sensor_count: int) -> dict:
+    """Validate event partitions and summarize cluster-count/size statistics."""
     if events.empty:
         raise ValueError("A monitoring run must include its initialization clustering event.")
     cluster_counts = [len(json.loads(value)) for value in events["selected_partition"]]
@@ -1135,6 +1306,7 @@ def _phase3a_cluster_metrics(events: pd.DataFrame, sensor_count: int) -> dict:
 
 
 def _phase3a_validate_us321(root: Path) -> dict:
+    """Load the retained US-3.21 validation summary or fail on missing evidence."""
     path = _phase3_reference_directory(root) / "phase3a_validation_summary.json"
     if not path.exists():
         raise FileNotFoundError(f"US-3.21 validation record not found: {path}")
@@ -1152,6 +1324,7 @@ def _phase3a_validate_us321(root: Path) -> dict:
 
 
 def _phase3a_alpha_plots(results_path: Path, output_dir: Path, phase2_messages: int) -> list[str]:
+    """Create legacy alpha-sweep plots and return their output paths."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -1184,6 +1357,12 @@ def _phase3a_alpha_plots(results_path: Path, output_dir: Path, phase2_messages: 
 
 
 def run_phase3a_alpha_sweep(root: Path) -> dict:
+    """Run the retained historical FMIC/SMIC alpha sweep in legacy locations.
+
+    The routine validates its input/reference evidence and writes sweep tables,
+    plots, and a summary under the legacy run area; it does not replace the
+    current revised controlled experiment.
+    """
     validation = _phase3a_validate_us321(root)
     inputs = load_phase3a_monitoring_inputs(root)
     alpha_steps = tuple(range(1, 20))
@@ -1416,7 +1595,14 @@ def build_phase3a_history_events(
     alpha_values=None,
     phase2_builder=build_phase2_trace,
 ):
-    """Build compact event rows using the validated experiment configuration."""
+    """Build compact clustering events at Phase 2's synchronization times.
+
+    The supplied threshold must match the authoritative cohort P90 in the
+    validated configuration. The Phase 2 trace supplies timing only; signed
+    histories are updated at those events and each requested alpha is evaluated
+    over shared normalization. The function returns event rows and the Phase 2
+    trace without publishing production artifacts.
+    """
     sensor_ids, sensor_columns, _, _, _ = validate_phase3a_config(experiment_config)
     authoritative_threshold = float(experiment_config["threshold"]["p90_value"])
     if float(threshold) != authoritative_threshold:
@@ -1616,23 +1802,32 @@ PHASE3_PEER_CATEGORIES = (
 
 
 def _sha256(path: Path) -> str:
+    """Return the SHA-256 digest of a file's current bytes."""
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def load_phase3_monitor():
+    """Load the shared Phase 3 monitor definitions for legacy test runners."""
     return FMICMonitor, MESSAGE_CATEGORIES
 
 
 def fixed_singleton_hooks(sensor_ids: tuple[str, ...]):
+    """Return fixed-singleton clustering and equal-weight allocation hooks.
+
+    The hooks implement C0 without altering the monitor's decision or message
+    logic. They are also used by C1/C2 control runs with method-specific weights.
+    """
     partition = tuple((sensor,) for sensor in sensor_ids)
 
     def clustering(_: Any) -> dict[str, Any]:
+        """Return the fixed singleton partition for the current sync event."""
         return {"selected_partition": partition, "partition_quality": 0.0}
 
     def allocation_strategy(
         _moment: Any, selected: tuple[tuple[str, ...], ...], allowance: float
     ):
+        """Assign equal budgets and reject any departure from fixed singletons."""
         del _moment
         if selected != partition:
             raise ValueError(
@@ -1658,6 +1853,7 @@ def run_phase3_control(
     threshold: float,
     monitor_class: Any,
 ):
+    """Run a full trace under equal allowances and fixed singleton clusters."""
     sensor_ids = tuple(column.removesuffix("_temperature") for column in sensor_columns)
     if not sensor_ids or len(set(sensor_ids)) != len(sensor_ids):
         raise ValueError("Phase 3 control requires a nonempty, unique sensor cohort.")
@@ -1685,6 +1881,7 @@ def run_phase3_control(
 
 
 def _phase2_snapshot(row: pd.Series, sensor_columns: list[str]) -> tuple[dict, dict]:
+    """Extract finite entry references and local allowances from a Phase 2 row."""
     references = {}
     allowances = {}
     for column in sensor_columns:
@@ -1704,6 +1901,13 @@ def compare_decisions(
     sensor_columns: list[str],
     phase3_events: list[dict],
 ) -> dict[str, Any]:
+    """Gate revised Phase 2/C0 equivalence at every bucket and message category.
+
+    The comparison checks entry-state references and allowances, trigger sets,
+    synchronization, root-known states, means, and mapped communication. Its
+    diagnostics identify the first mismatching bucket/field; this is a
+    comparability gate, not evidence that clustered runs have causal savings.
+    """
     check_names = (
         "timestamps",
         "synchronization_flags",
@@ -1733,6 +1937,7 @@ def compare_decisions(
         phase2_value: Any = None,
         phase3_value: Any = None,
     ) -> None:
+        """Attach a field-level mismatch to its bucket when one exists."""
         if index < phase2_length:
             row = phase2_trace.iloc[index]
             bucket_epoch = int(row["bucket_epoch"])
@@ -1768,6 +1973,7 @@ def compare_decisions(
         )
 
     def numeric_maps_equal(expected: dict, observed: dict) -> bool:
+        """Compare keyed numeric state with the comparator's absolute tolerance."""
         if expected.keys() != observed.keys():
             return False
         return all(
@@ -1783,6 +1989,7 @@ def compare_decisions(
     prior_phase2_state = None
 
     def record(index: int, field: str, phase2_value: Any, phase3_value: Any, equal: bool):
+        """Count a pass or record the supplied field's failed bucket comparison."""
         if equal:
             passed_counts[field] += 1
             return
@@ -1892,6 +2099,7 @@ def compare_decisions(
     }
 
     def event_time(event: dict) -> tuple[int, str] | None:
+        """Return the event's sortable epoch/time pair when both values exist."""
         try:
             return int(event["bucket_epoch"]), str(event["bucket_time_utc"])
         except (KeyError, TypeError, ValueError):
@@ -1905,6 +2113,7 @@ def compare_decisions(
         expected: Any,
         observed: Any,
     ) -> None:
+        """Record a missing, extra, or mismatched compact event detail."""
         if event_index < len(synchronized_rows):
             row = synchronized_rows[event_index]
             bucket_index = trace_index_by_time[
@@ -2073,6 +2282,7 @@ def compare_decisions(
 
 
 def _phase2_reference_directory(root: Path) -> Path:
+    """Return the directory containing immutable Phase 2 comparison references."""
     current = root / "artifacts" / "phase2_outputs"
     if not current.is_dir():
         raise FileNotFoundError(
@@ -2082,14 +2292,17 @@ def _phase2_reference_directory(root: Path) -> Path:
 
 
 def _phase3_operational_directory(root: Path) -> Path:
+    """Return the current Phase 3 operational-evidence directory."""
     return root / "artifacts" / "phase3_operational"
 
 
 def _phase3_reference_directory(root: Path) -> Path:
+    """Return the Phase 3 directory holding static and historical references."""
     return _phase3_operational_directory(root) / "references"
 
 
 def _resolve_legacy_output_dir(root: Path, output_dir: Path | None) -> Path:
+    """Resolve and constrain destinations for the retained legacy Phase 3A runs."""
     root = root.resolve()
     target = (
         output_dir.resolve()
@@ -2117,7 +2330,7 @@ def _resolve_legacy_output_dir(root: Path, output_dir: Path | None) -> Path:
 
 
 def _resolve_operational_dir(output_dir: Path) -> Path:
-    """Resolve the run-specific operational directory paired with selected outputs."""
+    """Resolve the operational-evidence sibling associated with a result directory."""
     output_dir = output_dir.resolve()
     if output_dir.name == "phase3_outputs":
         return output_dir.with_name("phase3_operational")
@@ -2125,6 +2338,7 @@ def _resolve_operational_dir(output_dir: Path) -> Path:
 
 
 def _phase3_layout(output_dir: Path, operational_dir: Path) -> dict[str, str]:
+    """Describe the distinct scientific-output and operational-evidence locations."""
     return {
         "outputs_directory": output_dir.name,
         "operational_directory": operational_dir.name,
@@ -2133,10 +2347,17 @@ def _phase3_layout(output_dir: Path, operational_dir: Path) -> dict[str, str]:
 
 
 def _relative_artifact_path(source_directory: Path, target: Path) -> str:
+    """Return a stable artifact path relative to the selected output directory."""
     return Path(os.path.relpath(target, source_directory)).as_posix()
 
 
 def _validate_contract(root: Path):
+    """Validate locked inputs, evidence, and protected files before equivalence.
+
+    The returned contract carries resolved paths, current source/input/config
+    hashes, and protected-artifact identities for the independent C0 check.
+    Invalid or stale dependencies fail before the candidate writes evidence.
+    """
     artifacts = root / "artifacts"
     reference_directory = _phase3_reference_directory(root)
     config_path = root / PROJECT_CONFIG_PATH
@@ -2244,6 +2465,7 @@ def _validate_contract(root: Path):
 
 
 def _read_locked_observations(contract: dict[str, Any]) -> tuple[pd.DataFrame, list[str]]:
+    """Read the contract's locked six-sensor data without relaxing its schema."""
     config = contract["config"]
     frame = pd.read_csv(
         contract["input_path"],
@@ -2290,6 +2512,7 @@ def _write_events(
     phase3_trace: list[dict],
     sensor_columns: list[str],
 ) -> None:
+    """Write compact event comparisons to the caller-selected evidence path."""
     records = []
     for phase2_row, phase3_row in zip(
         (row for _, row in phase2_trace.iterrows()), phase3_trace
@@ -2328,6 +2551,12 @@ def run_phase3a_protocol_equivalence(
     root: Path,
     output_dir: Path | None = None,
 ) -> dict[str, Any]:
+    """Compare fixed-singleton Phase 2 and Phase 3 behavior at every bucket.
+
+    The check writes a summary and compact event evidence under the selected
+    candidate directory. It does not evaluate clustered FMIC/SMIC savings or
+    replace preserved historical references.
+    """
     root = root.resolve()
     contract = _validate_contract(root)
     output_dir = (
@@ -2589,12 +2818,14 @@ BUNDLE_FILES = OUTPUT_FILES + OPERATIONAL_RUN_FILES
 
 
 def _json_fingerprint(value: Any) -> str:
+    """Hash canonical JSON for stable event/provenance comparisons."""
     return hashlib.sha256(json.dumps(
         value, sort_keys=True, separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")).hexdigest()
 
 
 def _write_csv_records(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Write dictionary rows using the established compact CSV representation."""
     columns = list(dict.fromkeys(key for row in rows for key in row))
     with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns, lineterminator="\n")
@@ -2603,6 +2834,7 @@ def _write_csv_records(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def _artifact_inventory(directory: Path, operational_dir: Path) -> dict[str, Any]:
+    """Inventory bundle files and hashes across output and operational folders."""
     inventory = {}
     keys = {
         RESULTS_PATH: ["config_id", "alpha_label"],
@@ -2626,6 +2858,7 @@ def _artifact_inventory(directory: Path, operational_dir: Path) -> dict[str, Any
 
 
 def _bundle_semantics() -> dict[str, Any]:
+    """Return the current manifest's required artifact roles and schemas."""
     return {
         "layout": "Four user-readable files in phase3_outputs; run manifest, C0 event file and receipt in its paired phase3_operational directory.",
         "counts": "Integer actual transmissions, checks, buckets or events; never bytes/latency.",
@@ -2648,7 +2881,12 @@ def _bundle_semantics() -> dict[str, Any]:
 
 
 def load_phase3_run(root: Path, directory: Path) -> dict[str, Any]:
-    """Validate a paired outputs/operational run and resolve its receipt in memory."""
+    """Validate and load one completed run and its operational manifest.
+
+    The loader checks bundle membership, hashes, source/input/config provenance,
+    and completion status. A stale or incomplete manifest is rejected rather
+    than treated as a successful saved run.
+    """
     root = root.resolve()
     directory = directory.resolve()
     operational_dir = _resolve_operational_dir(directory)
@@ -2706,6 +2944,7 @@ def load_phase3_run(root: Path, directory: Path) -> dict[str, Any]:
 
 
 def _read_result_frames(directory: Path) -> dict[str, pd.DataFrame]:
+    """Read the required scientific CSV tables from one Phase 3 output folder."""
     results = pd.read_csv(
         directory / RESULTS_PATH,
         dtype={
@@ -2758,10 +2997,12 @@ REGRESSION_REFERENCES = {
 
 
 def _read_json(path: Path) -> dict[str, Any]:
+    """Read a JSON object and reject other JSON top-level value types."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON through a sibling temporary file and atomic replacement."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
@@ -2786,6 +3027,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 def _integrity_differences(
     before: dict[str, str], after: dict[str, str]
 ) -> list[dict[str, str | None]]:
+    """Describe protected-file hash changes between two inventories."""
     differences = []
     for path in sorted(set(before) | set(after)):
         if before.get(path) != after.get(path):
@@ -2798,6 +3040,7 @@ def _integrity_differences(
 
 
 def _failure_provenance(root: Path) -> dict[str, Any]:
+    """Capture current source and prerequisite identities for a failed run."""
     candidates = {
         "runner_sha256": Path(__file__).resolve(),
         "config_sha256": root / PROJECT_CONFIG_PATH,
@@ -2831,6 +3074,7 @@ def _persist_failure(
     output_dir: Path,
     operational_dir: Path,
 ) -> None:
+    """Persist failure diagnostics only in the candidate operational directory."""
     failure: dict[str, Any] = {
         "stage": state.get("stage", "unknown"),
         "failure_reason": f"{type(error).__name__}: {error}",
@@ -2866,19 +3110,23 @@ def _persist_failure(
 
 
 def _load_engine():
+    """Load the canonical shared monitoring engine for current Phase 3 checks."""
     return sys.modules[__name__]
 
 
 def _fixed_singletons(sensor_ids: tuple[str, ...]):
+    """Build the fixed C0/C1/C2 singleton partition and its assignment hook."""
     partition = tuple((sensor,) for sensor in sensor_ids)
 
     def clustering(_clustering_input: Any) -> dict[str, Any]:
+        """Return the unchanged singleton partition for a synchronization."""
         return {"selected_partition": partition, "partition_quality": 0.0}
 
     return clustering
 
 
 def _resolve_output_dir(root: Path, output_dir: Path | None) -> Path:
+    """Resolve a candidate result directory and reject protected/source targets."""
     output = (output_dir or (root / "artifacts" / "phase3_outputs")).resolve()
     protected_directories = [
         root / name for name in ("scripts", "config", "Data", ".git")
@@ -2903,7 +3151,11 @@ def _resolve_output_dir(root: Path, output_dir: Path | None) -> Path:
 
 
 def validation_provenance(root: Path) -> dict[str, str]:
-    """Files covered by an externally executed regression validation."""
+    """Hash source, configuration, and prerequisite files covered by validation.
+
+    The resulting mapping binds an independently executed receipt to the exact
+    inputs and evidence used by Phase 3 production.
+    """
     relative_paths = [
         "scripts/phase3_implement.py", "scripts/shared_monitoring_engine.py",
         "scripts/phase1_implement.ipynb",
@@ -2931,6 +3183,7 @@ def validation_provenance(root: Path) -> dict[str, str]:
 
 
 def _read_validation_record(root: Path, path: Path | None) -> dict[str, Any]:
+    """Read the external test receipt supplied to production, if present."""
     if path is None:
         raise ValueError("A current --validation-record from separately executed tests is required.")
     record = _read_json(path)
@@ -2942,6 +3195,7 @@ def _read_validation_record(root: Path, path: Path | None) -> dict[str, Any]:
 
 
 def _validate_validation_record(root: Path, record: dict[str, Any]) -> None:
+    """Require a complete passing receipt with current source and input hashes."""
     count = record.get("test_count")
     if (
         record.get("schema_version") != 2
@@ -2969,6 +3223,7 @@ def _validate_validation_record(root: Path, record: dict[str, Any]) -> None:
 
 
 def _equivalence_provenance(root: Path, contract: dict[str, Any]) -> dict[str, Any]:
+    """Build the hash set used to establish whether cached C0 evidence is current."""
     return {
         "input_sha256": _sha256(contract["input_path"]),
         "preparation_sha256": preparation_fingerprint(contract["monitoring_preparation"]),
@@ -2987,6 +3242,7 @@ def _equivalence_provenance(root: Path, contract: dict[str, Any]) -> dict[str, A
 def _equivalence_is_current(
     report: dict[str, Any], events_path: Path, expected: dict[str, Any],
 ) -> bool:
+    """Check that cached C0 evidence and its provenance match current inputs."""
     return (
         events_path.is_file()
         and report.get("status") == "passed"
@@ -3002,6 +3258,7 @@ def _validate_prerequisites(
     root: Path, contract: dict[str, Any], output_dir: Path,
     validation: dict[str, Any],
 ) -> dict[str, Any]:
+    """Require current prerequisite evidence or generate isolated fresh C0 proof."""
     us321 = _phase3a_validate_us321(root)
     expected = _equivalence_provenance(root, contract)
     events_name = EQUIVALENCE_EVENTS_PATH
@@ -3027,6 +3284,7 @@ def _validate_prerequisites(
 
 
 def _protected_hashes(root: Path) -> dict[str, str]:
+    """Hash historical and otherwise protected files before candidate execution."""
     artifacts = root / "artifacts"
     protected_paths = {
         path.resolve() for path in artifacts.iterdir()
@@ -3051,6 +3309,7 @@ def _protected_hashes(root: Path) -> dict[str, str]:
 def _validate_partition(
     partition: tuple[tuple[str, ...], ...], sensor_ids: tuple[str, ...]
 ) -> None:
+    """Require a nonempty partition covering every sensor exactly once."""
     members = tuple(sensor for cluster in partition for sensor in cluster)
     if (
         not partition
@@ -3064,6 +3323,7 @@ def _validate_partition(
 def _event_snapshot(
     event: dict[str, Any], config_id: str, alpha_label: str
 ) -> dict[str, Any]:
+    """Select the scientific state fields persisted for one sync event."""
     fields = (
         "synchronization_id",
         "bucket_epoch",
@@ -3099,6 +3359,7 @@ def _event_snapshot(
 
 
 def _composition(category_totals: dict[str, int]) -> dict[str, Any]:
+    """Reconcile seven one-way message categories into three exclusive pathways."""
     if set(category_totals) != set(MESSAGE_CATEGORIES):
         raise ValueError("Transmission categories do not match the seven-category contract.")
     if any(value < 0 for value in category_totals.values()):
@@ -3137,6 +3398,7 @@ def _run_monitor(
     clustering: Any = None,
     allocation_strategy: Any = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run one isolated configuration and derive event/size summaries."""
     sensor_ids = tuple(column.removesuffix("_temperature") for column in sensor_columns)
     kwargs = {}
     if fixed_singletons:
@@ -3308,6 +3570,7 @@ def _configuration_row(
     *,
     source: str,
 ) -> dict[str, Any]:
+    """Map a monitor summary to the stable control/alpha result-table schema."""
     row = {
         "config_id": config_id,
         "algorithm": method,
@@ -3371,6 +3634,7 @@ def _configuration_row(
 
 
 def _validate_alpha_grid(alpha_rows: list[dict[str, Any]]) -> None:
+    """Require the complete approved alpha grid and valid outcomes."""
     frame = pd.DataFrame(alpha_rows)
     if len(frame) != 38 or frame[["algorithm", "alpha_label"]].duplicated().any():
         raise ValueError("The alpha grid must contain 38 unique method/alpha pairs.")
@@ -3396,6 +3660,7 @@ def _validate_alpha_grid(alpha_rows: list[dict[str, Any]]) -> None:
 def _validate_regression_references(
     controls: list[dict[str, Any]], alpha_rows: list[dict[str, Any]]
 ) -> None:
+    """Stop when fixed scientific fingerprints differ from their references."""
     rows = controls + alpha_rows
     by_config = {
         (row["config_id"], row["alpha_label"]): row
@@ -3424,6 +3689,7 @@ def _validate_saved_regression_outputs(
     controls: list[dict[str, Any]],
     alpha_rows: list[dict[str, Any]],
 ) -> None:
+    """Compare candidate result rows with preserved regression tables."""
     checks = (
         "correctness_status",
         "false_safe_count",
@@ -3493,6 +3759,7 @@ def _from_existing_c0(
     gates: dict[str, Any],
     sensor_ids: tuple[str, ...],
 ) -> dict[str, Any]:
+    """Translate validated Phase 2/C0 equivalence evidence into a C0 result row."""
     report = gates["us324"]
     comparison = report["comparison"]
     mapping = report["message_mapping"]
@@ -3580,6 +3847,7 @@ def _from_existing_c0(
 
 
 def _validate_control(summary: dict[str, Any]) -> None:
+    """Reject an invalid control result before including it in comparisons."""
     if (
         summary["bucket_count"] != 19984
         or summary["global_threshold_violation_count"] != 1999
@@ -3602,6 +3870,7 @@ def _run_control(
     threshold: float,
     method: str,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run C1 or C2 with singleton clusters and validate its control invariants."""
     monitor_class = engine.FMICMonitor
     summary, by_size, events = _run_monitor(
         monitor_class,
@@ -3659,6 +3928,7 @@ def _run_alpha(
     method: str,
     alpha_label: str,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run one FMIC/SMIC alpha and return its row, cluster counts, and snapshots."""
     summary, by_size, events = _run_monitor(
         engine.FMICMonitor,
         frame,
@@ -3733,6 +4003,7 @@ def _run_alpha(
 
 
 def _contrast(source: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    """Describe a matched source-to-target contrast without causal generalization."""
     return {
         "message_difference": source["total_messages"] - target["total_messages"],
         "percent_relative_to_source": (
@@ -3783,6 +4054,7 @@ def _configuration_table(
     minima: dict[str, Any],
     centralized_messages: int,
 ) -> list[dict[str, Any]]:
+    """Assemble revised Phase 2, control, and clustered comparison rows."""
     table = [{
         "config_id": "revised_phase2",
         "algorithm": "Phase 2 revised",
@@ -4122,6 +4394,12 @@ def _build_comparisons(
     revised_phase2_messages: int,
     centralized_messages: int,
 ) -> dict[str, Any]:
+    """Build conditional weighting/clustering contrasts and alpha summaries.
+
+    The 0.10 reference is prespecified; grid minima are exploratory and
+    in-sample. Pairwise contrasts are dataset-specific, not additive causal
+    estimates.
+    """
     by_id = {row["config_id"]: row for row in controls}
     c0, c1, c2 = (by_id[name] for name in ("C0", "C1", "C2"))
     comparisons: dict[str, Any] = {
@@ -4247,6 +4525,7 @@ def _run_fresh_process_replay(
     alpha_label: str,
     expected: dict[str, Any],
 ) -> dict[str, Any]:
+    """Execute one replay in a child interpreter and verify its scientific fields."""
     command = [
         sys.executable,
         "-B",
@@ -4298,6 +4577,7 @@ def _run_fresh_process_replay(
 
 
 def _replay(root: Path, method: str, alpha_label: str) -> dict[str, Any]:
+    """Recompute and compare one saved configuration using isolated outputs."""
     is_control = method in ("C1", "C2")
     if is_control:
         if alpha_label != "not_applicable":
@@ -4343,6 +4623,12 @@ def run_us325(
     root: Path, output_dir: Path | None = None,
     validation_record: Path | None = None,
 ) -> dict[str, Any]:
+    """Run the current controlled evaluation after validating candidate paths.
+
+    Production records its own run/failure manifest, but it does not execute
+    the independent regression suite. The caller must provide a current external
+    receipt; outputs and operational metadata are paired in the selected layout.
+    """
     root = root.resolve()
     output_dir = _resolve_output_dir(root, output_dir)
     operational_dir = _resolve_operational_dir(output_dir)
@@ -4415,6 +4701,13 @@ def _run_us325(
     operational_dir: Path,
     validation_record: Path | None,
 ) -> dict[str, Any]:
+    """Execute the validated controls, clustered grid, comparisons, and bundle.
+
+    The independently generated receipt is checked before work proceeds.
+    Candidate outputs and operational evidence are kept in their separate
+    directories; any error remains a failed candidate rather than a passing
+    partial result.
+    """
     artifacts = output_dir
     state["stage"] = "contract_validation"
     contract = _validate_contract(root)
@@ -4893,6 +5186,12 @@ def _run_us325(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse Phase 3 production/check options and dispatch the requested mode.
+
+    ``--help`` uses this module's docstring. Production requires an external
+    current validation receipt; equivalence and replay modes follow their own
+    documented output behavior and never change their option defaults here.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output-dir", type=Path)

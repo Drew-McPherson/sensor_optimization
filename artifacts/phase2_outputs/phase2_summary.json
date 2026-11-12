@@ -81,8 +81,8 @@
     "provenance": {
       "input_sha256": "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b",
       "config_sha256": "a1d5ef4f8bd3e07220e78533c8bf3c63ad219f43dda9f3f2e60242ba6a4a3fc9",
-      "producer_sha256": "e65ca021c649caedebaf948553aa08de7fada0c129354255143343943e047f0b",
-      "publication_sha256": "95ca050fb6f35a0b3c6b37c0f0dbbfe3bb3a499496573d124d8b2bc897545eed"
+      "producer_sha256": "1179c6eaf5ca0222da134d5df2d6a2003bdd3bdb8809acc3fc179b8cc3afc0de",
+      "publication_sha256": "84a55fddebd7a38a824abfe9232341282f9fc32128020d251843aaddc7961692"
     }
   },
   "threshold_statistic": "p90",
@@ -128,11 +128,11 @@
   },
   "provenance": {
     "input_sha256": "07f4eb49687e7f50e8d9179914e1f7b8a93ef83cef99b43cf9f073881051cb9b",
-    "preparation_sha256": "e3b241e032a88c8ef4691a3dee3e31c2e3a32d2b2b787d8c8a7bd29ef9b1029e",
+    "preparation_sha256": "6e6de410187aba2d331c75f6ced9ae80e8163a9f2314cc3ee4475917f824a83b",
     "config_sha256": "a1d5ef4f8bd3e07220e78533c8bf3c63ad219f43dda9f3f2e60242ba6a4a3fc9",
-    "code_sha256": "e65ca021c649caedebaf948553aa08de7fada0c129354255143343943e047f0b",
+    "code_sha256": "1179c6eaf5ca0222da134d5df2d6a2003bdd3bdb8809acc3fc179b8cc3afc0de",
     "historical_baseline_sha256": "4fca257e651000433caaa7b83e70b0f10ca32f77b0840e896479eeb7bc5c2127",
-    "artifact_writer_sha256": "e65ca021c649caedebaf948553aa08de7fada0c129354255143343943e047f0b"
+    "artifact_writer_sha256": "1179c6eaf5ca0222da134d5df2d6a2003bdd3bdb8809acc3fc179b8cc3afc0de"
   },
   "validation_commands": [
     "python -B -m scripts.shared_monitoring_engine validate"

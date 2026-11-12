@@ -1,4 +1,19 @@
-"""Independent regression tests for shared monitoring and Phase 2 contracts."""
+"""Independently test shared preparation, Phase 2 behavior, and Phase 3 dependencies.
+
+The shared monitoring engine owns stable-cohort preparation, threshold
+provenance, Phase 2 state decisions, and artifact freshness contracts consumed
+by Phase 3. These tests use small synthetic rows and isolated temporary
+repositories; they do not represent the full Phase 3 production dataset.
+Membership/departure cases exercise general Phase 2 behavior, whereas Phase 3A
+uses a complete fixed six-sensor cohort.
+
+The suite checks full-precision six-sensor means/P90, complete observations,
+entry-state transitions, two-sided root-state correctness, independent oracle
+isolation, publication receipts, and compact exports. Corrupted fixtures are
+deliberate negative controls. Temporary files, mocks, and subprocesses are
+confined to test-owned locations; the oracle diagnoses state but never controls
+monitoring messages.
+"""
 
 import csv
 import datetime as dt
@@ -41,6 +56,7 @@ SENSOR_IDS = ("A", "C", "D", "E", "F", "G")
 
 
 def make_config(bucket_count):
+    """Build a minimal inclusive one-minute config for a synthetic trace."""
     start = dt.datetime(2022, 1, 1, tzinfo=dt.timezone.utc)
     end = start + dt.timedelta(minutes=bucket_count - 1)
     return {
@@ -58,6 +74,7 @@ def make_config(bucket_count):
 
 
 def make_rows(sensor_values):
+    """Convert row-major sensor values into timestamped six-sensor records."""
     start = dt.datetime(2022, 1, 1, tzinfo=dt.timezone.utc)
     rows = []
     for offset, readings in enumerate(sensor_values):
@@ -77,12 +94,16 @@ def make_rows(sensor_values):
 
 
 class Phase3AStatisticsTests(unittest.TestCase):
+    """Check stable-cohort mean/P90 preparation and its evidence boundaries."""
+
     def test_round_trip_csv_parser_preserves_full_precision_p90(self):
+        """Retain the exact decimal P90 through round-trip CSV parsing."""
         csv_text = "series_name,p90\n" "phase3a_stable_cohort,22.428666649999997\n"
         parsed = pd.read_csv(io.StringIO(csv_text), float_precision="round_trip")
         self.assertEqual(float(parsed.iloc[0]["p90"]), 22.428666649999997)
 
     def test_six_sensor_average_and_linear_p90_keep_full_precision(self):
+        """Derive six-sensor means and linear P90 without display rounding."""
         rows = make_rows(
             [
                 (0.0, 1.0, 2.0, 3.0, 4.0, 5.0),
@@ -100,6 +121,7 @@ class Phase3AStatisticsTests(unittest.TestCase):
         self.assertEqual(statistics_row["non_null_value_count"], 3)
 
     def test_phase3a_averages_require_complete_finite_contiguous_input(self):
+        """Reject gaps, missing readings, and non-finite cohort values."""
         rows = make_rows([(1.0,) * 6, (2.0,) * 6, (3.0,) * 6])
         config = make_config(3)
         self.assertEqual(build_phase3a_average_values(rows, config), [1.0, 2.0, 3.0])
@@ -124,6 +146,7 @@ class Phase3AStatisticsTests(unittest.TestCase):
             build_phase3a_average_values(nonfinite_rows, config)
 
     def test_authoritative_threshold_provenance(self):
+        """Require a derived threshold policy rather than a stored numeric override."""
         config = {
             "threshold": {
                 "source_series": "phase3a_stable_cohort", "statistic": "p90",
@@ -137,6 +160,7 @@ class Phase3AStatisticsTests(unittest.TestCase):
             validate_preparation_policy(config)
 
     def test_preparation_is_read_only_and_rejects_stale_evidence(self):
+        """Keep shared preparation read-only and fail on stale input identity."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "config").mkdir()
@@ -183,6 +207,7 @@ class Phase3AStatisticsTests(unittest.TestCase):
                 prepare_monitoring(root)
 
     def test_definition_loading_does_not_run_or_require_raw_inputs(self):
+        """Load reusable Phase 1 definitions without executing its pipeline."""
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
             isolated = Path(temporary)
@@ -200,7 +225,10 @@ class Phase3AStatisticsTests(unittest.TestCase):
 
 
 class ArtifactContractTests(unittest.TestCase):
+    """Verify publication receipts, source identity, and import-safe behavior."""
+
     def setUp(self):
+        """Create an isolated synthetic repository for artifact-contract checks."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
@@ -235,9 +263,11 @@ class ArtifactContractTests(unittest.TestCase):
         self.write_receipt()
 
     def write_receipt(self):
+        """Write a passing fixture receipt bound to current synthetic hashes."""
         (self.root / contract.RECEIPT).write_text(json.dumps(self.receipt), encoding="utf-8")
 
     def test_receipt_is_required_and_must_pass(self):
+        """Reject absent, failed, or incomplete independent validation evidence."""
         self.assertEqual(contract.load_validated(self.root), self.summary)
         (self.root / contract.RECEIPT).unlink()
         with self.assertRaises(FileNotFoundError):
@@ -249,6 +279,7 @@ class ArtifactContractTests(unittest.TestCase):
                 contract.load_validated(self.root)
 
     def test_changed_evidence_is_rejected(self):
+        """Detect changed source or artifact bytes after receipt creation."""
         for relative in (contract.SUMMARY, contract.EVENTS, *map(Path, contract.SOURCES)):
             path = self.root / relative
             original = path.read_bytes()
@@ -259,6 +290,7 @@ class ArtifactContractTests(unittest.TestCase):
                 path.write_bytes(original)
 
     def test_partial_or_mixed_runs_are_rejected(self):
+        """Reject incomplete evidence bundles and artifacts from mixed run IDs."""
         self.summary["events_sha256"] = "0" * 64
         (self.root / contract.SUMMARY).write_bytes(contract._json_bytes(self.summary))
         self.receipt["summary_sha256"] = contract._hash(self.root / contract.SUMMARY)
@@ -267,6 +299,7 @@ class ArtifactContractTests(unittest.TestCase):
             contract.load_validated(self.root)
 
     def test_import_does_not_run_or_write_artifacts(self):
+        """Verify importing the shared engine does not publish or execute work."""
         repository = Path(__file__).resolve().parents[1]
         before = {path: path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
         code = (
@@ -283,7 +316,10 @@ class ArtifactContractTests(unittest.TestCase):
 
 
 class MembershipTests(unittest.TestCase):
+    """Exercise general Phase 2 membership changes and observed-only transitions."""
+
     def trace(self, values, threshold=20.0):
+        """Build a synthetic Phase 2 trace for the supplied changing membership."""
         frame = pd.DataFrame(values, columns=["A_temperature", "B_temperature"])
         frame["bucket_epoch"] = np.arange(len(frame)) * 60
         frame["bucket_time_utc"] = [f"t{i}" for i in range(len(frame))]
@@ -295,6 +331,7 @@ class MembershipTests(unittest.TestCase):
         return result
 
     def test_startup_departure_and_return(self):
+        """Check startup, departure, and return effects on member state."""
         rows = self.trace([[10, 10], [10, None], [10, 10]])
         self.assertEqual(rows.total_message_count.tolist(), [6, 3, 6])
         self.assertEqual(rows.event_resync_performed.tolist(), [1, 1, 1])
@@ -304,6 +341,7 @@ class MembershipTests(unittest.TestCase):
         self.assertTrue(pd.isna(rows.loc[2, "entry_B_reference_value"]))
 
     def test_stable_membership_and_local_trigger(self):
+        """Keep stable membership silent until a local deviation triggers."""
         rows = self.trace([[10, 10], [10, 10], [20, 10], [20, 10]])
         self.assertEqual(rows.event_resync_performed.tolist(), [1, 0, 1, 0])
         self.assertEqual(rows.total_message_count.tolist(), [6, 0, 7, 0])
@@ -313,6 +351,7 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(rows.loc[3, "entry_A_reference_value"], 20)
 
     def test_simultaneous_departure_and_return(self):
+        """Resolve simultaneous membership changes from current observations only."""
         rows = self.trace([[10, None], [None, 12]])
         self.assertEqual(rows.total_message_count.tolist(), [3, 3])
         self.assertEqual(rows.loc[1, "event_departing_sensor_names"], "A")
@@ -320,6 +359,7 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "observed_global_average"], 12)
 
     def test_membership_sync_above_threshold(self):
+        """Synchronize on membership change even when the global mean is violated."""
         rows = self.trace([[21, 21], [22, None]])
         self.assertEqual(rows.total_message_count.tolist(), [6, 3])
         self.assertEqual(rows.loc[1, "event_resync_reason"], "sensor_membership_changed")
@@ -327,6 +367,7 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "trigger_message_count"], 0)
 
     def test_all_offline_pending_then_return(self):
+        """Carry pending membership work across empty buckets until a sensor returns."""
         rows = self.trace([[10, 10], [None, None], [None, None], [12, None]])
         self.assertEqual(rows.total_message_count.tolist(), [6, 0, 0, 3])
         self.assertEqual(rows.exit_resync_pending.tolist(), [0, 1, 1, 0])
@@ -338,6 +379,7 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(rows.loc[3, "exit_xbar_t0_if_resync"], 12)
 
     def test_leading_empty_rows_do_not_look_ahead(self):
+        """Avoid using future sensor availability to decide earlier empty rows."""
         rows = self.trace([[None, None], [None, None], [12, None], [12, None]])
         self.assertTrue(rows.loc[:2, "entry_xbar_t0"].isna().all())
         self.assertEqual(rows.event_initialization_performed.tolist(), [0, 0, 1, 0])
@@ -345,12 +387,14 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(rows.loc[3, "entry_xbar_t0"], 12)
 
     def test_entirely_empty_run(self):
+        """Handle a trace with no observed sensors without inventing state."""
         rows = self.trace([[None, None], [None, None]])
         self.assertEqual(rows.total_message_count.sum(), 0)
         self.assertTrue(rows.global_violation.isna().all())
         self.assertEqual(rows.exit_resync_pending.tolist(), [1, 1])
 
     def test_zero_allowance_then_stable_violated_state(self):
+        """Preserve zero-allowance checks while retaining a known violated state."""
         rows = self.trace([[20, 20], [20, 20], [21, 21], [21, 21]])
         self.assertEqual(rows.global_violation.tolist(), [1, 1, 1, 1])
         self.assertEqual(rows.loc[1, "event_resync_reason"], "local_constraint_violation")
@@ -359,15 +403,18 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(rows.loc[3, "trigger_message_count"], 0)
 
     def test_nonfinite_reading_is_explicit_error(self):
+        """Reject non-finite observed values instead of silently excluding them."""
         with self.assertRaisesRegex(ValueError, "Non-finite sensor reading"):
             self.trace([[10, float("inf")]])
 
     def test_threshold_decisions_use_unrounded_values(self):
+        """Apply threshold comparisons to source precision rather than rounded text."""
         rows = self.trace([[19.99999, 19.99999], [20.00001, 20.00001]])
         self.assertEqual(rows.observed_global_average.tolist(), [20, 20])
         self.assertEqual(rows.global_violation.tolist(), [0, 1])
 
     def test_trace_can_preserve_full_precision_for_protocol_comparison(self):
+        """Keep full precision available for exact Phase 2/C0 protocol comparison."""
         frame = pd.DataFrame(
             [[10.123456789, 11.987654321], [10.123456789, 11.987654321]],
             columns=["A_temperature", "B_temperature"],
@@ -389,6 +436,7 @@ class MembershipTests(unittest.TestCase):
         )
 
     def test_membership_pending_survives_empty_buckets_above_threshold(self):
+        """Retain unresolved membership changes across empty violated buckets."""
         rows = self.trace([[21, 21], [None, None], [None, None], [19, None]])
         self.assertEqual(rows.total_message_count.tolist(), [6, 0, 0, 3])
         self.assertEqual(rows.loc[3, "event_resync_reason"], "sensor_membership_changed")
@@ -396,6 +444,7 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(rows.loc[3, "exit_resync_pending"], 0)
 
     def test_normalization_preserves_missing_and_numeric_strings(self):
+        """Normalize numeric text while preserving explicit missing observations."""
         frame = pd.DataFrame({
             "bucket_epoch": [0, 60, 120],
             "A_temperature": ["12.5", None, np.nan],
@@ -406,6 +455,7 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(frame.loc[0, "A_temperature"], "12.5")
 
     def test_normalization_rejects_malformed_and_nonfinite_readings(self):
+        """Reject malformed or non-finite readings during trace normalization."""
         for value in ("bad", "NA", "NaN", " ", float("inf"), -float("inf")):
             with self.subTest(value=value):
                 frame = pd.DataFrame({
@@ -417,7 +467,10 @@ class MembershipTests(unittest.TestCase):
 
 
 class CorrectnessTests(unittest.TestCase):
+    """Verify two-sided root-state correctness and isolation of the offline oracle."""
+
     def trace(self, values, threshold=20.0):
+        """Build a compact correctness trace from synthetic sensor values."""
         sensors = [f"{name}_temperature" for name in "ABCD"[:len(values[0])]]
         frame = pd.DataFrame(values, columns=sensors, dtype=float)
         frame["bucket_epoch"] = np.arange(len(frame)) * 60
@@ -427,6 +480,7 @@ class CorrectnessTests(unittest.TestCase):
         return rows, frame, sensors
 
     def test_warming_local_violation_global_safe(self):
+        """Distinguish a local trigger from a global threshold violation."""
         rows, _, _ = self.trace([[10, 10], [20, 10]])
         self.assertEqual(rows.distributed_constraint_state.tolist(), ["NOT_EVALUABLE", "VIOLATING"])
         self.assertEqual(rows.centralized_constraint_state.tolist(), ["FEASIBLE", "FEASIBLE"])
@@ -434,6 +488,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "legacy_event_false_alert"], 1)
 
     def test_constant_above_threshold_stays_known_without_messages(self):
+        """Keep root-known VIOLATED state during silent unchanged observations."""
         rows, _, _ = self.trace([[21, 21]] * 5)
         self.assertEqual(rows.total_message_count.tolist(), [6, 0, 0, 0, 0])
         self.assertEqual(rows.root_known_state.tolist(), ["VIOLATED"] * 5)
@@ -446,6 +501,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertNotIn("negative_delta_from_prior_row", "|".join(rows.event_resync_causes))
 
     def test_cooling_within_allowance_then_crossing(self):
+        """Retain the known state until cooling crosses the permitted boundary."""
         rows, _, _ = self.trace([[22, 22], [21, 21], [19, 19], [19, 19]])
         self.assertEqual(rows.root_known_state.tolist(), ["VIOLATED", "VIOLATED", "SAFE", "SAFE"])
         self.assertEqual(rows.event_resync_performed.tolist(), [1, 0, 1, 0])
@@ -455,6 +511,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.false_violated.sum(), 0)
 
     def test_opposite_deviations_strictly_inside_equal_allowances(self):
+        """Allow opposite sub-boundary deviations without unnecessary collection."""
         rows, _, _ = self.trace([[10, 10], [19, 1], [1, 19]])
         self.assertEqual(rows.total_message_count.tolist(), [6, 0, 0])
         self.assertEqual(rows.root_known_state.tolist(), ["SAFE"] * 3)
@@ -462,6 +519,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "event_B_allowance_remaining"], 1)
 
     def test_negative_deviation_boundary(self):
+        """Apply the absolute local-deviation boundary to a negative change."""
         for epsilon, triggered in ((0.000001, 0), (0, 1), (-0.000001, 1)):
             with self.subTest(epsilon=epsilon):
                 rows, _, _ = self.trace([[22, 22], [20 + epsilon, 22]])
@@ -470,6 +528,7 @@ class CorrectnessTests(unittest.TestCase):
                 self.assertEqual(rows.false_violated.sum(), 0)
 
     def test_zero_allowance_unchanged_then_cooling_one_collection_per_bucket(self):
+        """Preserve zero-allowance triggers while limiting collection per bucket."""
         rows, _, _ = self.trace([[20, 20], [20, 20], [19, 19], [19, 19]])
         self.assertEqual(rows.root_known_state.tolist(), ["VIOLATED", "VIOLATED", "SAFE", "SAFE"])
         self.assertEqual(rows.total_message_count.tolist(), [6, 8, 8, 0])
@@ -482,6 +541,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[3, "entry_root_allowance"], 1)
 
     def test_oracle_detects_both_injected_root_state_defects(self):
+        """Detect independently injected false-safe and false-violated root states."""
         rows, observations, sensors = self.trace([[10, 10], [21, 21]])
         broken = rows.copy()
         broken.loc[0, "root_known_state"] = "VIOLATED"
@@ -501,10 +561,12 @@ class CorrectnessTests(unittest.TestCase):
                                 check_trace_invariants(corrupted, observations, sensors, 20.0)))
 
     def test_offline_checker_changes_cannot_control_communication(self):
+        """Prove changing the offline checker does not alter protocol messages."""
         rows, observations, sensors = self.trace([[22, 22], [21, 21], [19, 19]])
         captured = []
 
         def faulty_oracle(trace, inputs, columns, threshold):
+            """Return deliberately wrong truth solely for this negative control."""
             captured.append(trace.copy())
             result = evaluate_root_states(trace, inputs, columns, threshold)
             result["false_safe"] = 1
@@ -520,12 +582,14 @@ class CorrectnessTests(unittest.TestCase):
             self.assertEqual(captured[0][column].tolist(), rows[column].tolist())
 
     def test_nonfinite_mean_or_allowance_is_an_explicit_failure(self):
+        """Fail explicitly when means or allowances become non-finite."""
         with self.assertRaisesRegex(ValueError, "Non-finite Phase 2 mean"):
             self.trace([[1e308, 1e308]])
         with self.assertRaisesRegex(ValueError, "Non-finite root allowance"):
             MembershipTests().trace([[-1e308, -1]], threshold=1.5e308)
 
     def test_safe_signed_cancellation(self):
+        """Confirm opposite signed changes cancel under the cluster/global checks."""
         rows, _, _ = self.trace([[10, 10], [21, -1]])
         self.assertEqual(rows.loc[1, "observed_global_average"], 10)
         self.assertEqual(rows.loc[1, "distributed_constraint_state"], "VIOLATING")
@@ -533,6 +597,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "total_message_count"], 8)
 
     def test_partial_cancellation_crosses_global_threshold(self):
+        """Require root escalation when residual signed change crosses the threshold."""
         rows, _, _ = self.trace([[10, 10], [33, 9]])
         self.assertEqual(rows.loc[1, "observed_global_average"], 21)
         self.assertEqual(rows.loc[1, "global_violation"], 1)
@@ -540,6 +605,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "exit_xbar_t0_if_resync"], 21)
 
     def test_multiple_triggers_one_sync_unequal_initial_temperatures(self):
+        """Use unequal sensor references to verify one collection for multiple triggers."""
         rows, _, _ = self.trace([[8, 10, 12], [18, 20, 22]])
         self.assertEqual(rows.loc[1, "event_resync_request_count"], 3)
         self.assertEqual(rows.loc[1, "event_resync_performed"], 1)
@@ -548,6 +614,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "entry_C_reference_value"], 12)
 
     def test_local_and_global_boundaries_use_unrounded_values(self):
+        """Check exact local/global boundary behavior at full numeric precision."""
         for epsilon, state in ((-0.000001, "FEASIBLE"), (0, "VIOLATING"), (0.000001, "VIOLATING")):
             with self.subTest(epsilon=epsilon):
                 rows, _, _ = self.trace([[10, 10], [20 + epsilon, 10]])
@@ -564,6 +631,7 @@ class CorrectnessTests(unittest.TestCase):
                                     check_trace_invariants(corrupted, source, sensors, 20.0)))
 
     def test_forced_rows_report_violations_without_trigger_messages(self):
+        """Separate forced correctness rows from protocol-trigger transmissions."""
         rows, _, _ = self.trace([[21, 21], [22, None]])
         self.assertEqual(rows.loc[1, "distributed_constraint_state"], "VIOLATING")
         self.assertEqual(rows.loc[1, "event_A_local_deviation"], 1)
@@ -572,6 +640,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "event_resync_causes"], "sensor_membership_changed")
 
     def test_cooling_clears_global_and_local_state(self):
+        """Refresh root-known and local state when a cooling crossing synchronizes."""
         rows, _, _ = self.trace([[21, 21], [19, 19], [19, 19]])
         self.assertEqual(rows.centralized_constraint_state.tolist(),
                          ["VIOLATING", "FEASIBLE", "FEASIBLE"])
@@ -581,6 +650,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[2, "event_resync_performed"], 0)
 
     def test_partial_comparison_cannot_claim_feasible(self):
+        """Prevent an incomplete comparison from receiving a passing status."""
         rows, _, _ = self.trace([[10, None], [10, 10], [10, 10]])
         self.assertEqual(rows.distributed_constraint_state.tolist(),
                          ["NOT_EVALUABLE", "NOT_EVALUABLE", "FEASIBLE"])
@@ -590,6 +660,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.distributed_constraint_state.tolist(), ["UNDEFINED", "NOT_EVALUABLE"])
 
     def test_four_sensor_membership_reference_refresh(self):
+        """Refresh references using only currently observed Phase 2 members."""
         rows, _, _ = self.trace([[5, 10, 15, 10], [5, None, 15, 10], [5, 11, 15, 10], [5, 11, 15, 10]])
         self.assertEqual(rows.observed_online_sensor_count.tolist(), [4, 3, 4, 4])
         self.assertEqual(rows.total_message_count.tolist(), [12, 9, 12, 0])
@@ -598,6 +669,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[3, "entry_root_allowance"], 9.75)
 
     def test_departure_raises_mean_without_remaining_sensor_warming(self):
+        """Attribute a changed global mean to departure rather than warming."""
         rows, _, _ = self.trace([[10, 25], [None, 25]])
         self.assertEqual(rows.observed_global_average.tolist(), [17.5, 25])
         self.assertEqual(rows.global_violation.tolist(), [0, 1])
@@ -610,6 +682,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[1, "total_message_count"], 3)
 
     def test_return_changes_denominator_and_establishes_next_row_reference(self):
+        """Recompute membership mean and references when an offline sensor returns."""
         rows, _, _ = self.trace([[25, None], [25, 10], [25, 10]])
         self.assertEqual(rows.observed_online_sensor_count.tolist(), [1, 2, 2])
         self.assertEqual(rows.observed_global_average.tolist(), [25, 17.5, 17.5])
@@ -623,6 +696,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(rows.loc[2, "entry_root_allowance"], 2.5)
 
     def test_trace_validator_detects_corruption_with_bucket_and_field(self):
+        """Identify corrupted trace fields with their bucket-level diagnostics."""
         rows, frame, sensors = self.trace([[10, 10], [20, 10], [20, None], [None, None], [19, 19]])
         mutations = [
             (1, "distributed_constraint_state", "FEASIBLE"),
@@ -661,6 +735,7 @@ class CorrectnessTests(unittest.TestCase):
                             check_trace_invariants(corrupted, frame, sensors, 20.0, rounded=False)))
 
     def test_csv_export_corruption_has_bucket_field_diagnostic(self):
+        """Report the exact bucket and field for a corrupted exported row."""
         rows, frame, sensors = self.trace([[10, 10], [20, 10], [20, None]])
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "phase2_trace.csv"
@@ -678,6 +753,7 @@ class CorrectnessTests(unittest.TestCase):
         )
 
     def test_reference_calculation_over_random_stream(self):
+        """Compare the online trace with an independent deterministic calculation."""
         rng = np.random.default_rng(108)
         values = rng.uniform(5, 35, size=(120, 4))
         values[rng.random(values.shape) < 0.15] = np.nan
@@ -720,7 +796,10 @@ class CorrectnessTests(unittest.TestCase):
 
 
 class MatchedProductionTests(unittest.TestCase):
+    """Validate locked-cohort reproduction, isolated outputs, and fail-closed inputs."""
+
     def create_matched_fixture(self, root):
+        """Create a temporary matched Phase 1/2/3 fixture and prerequisite records."""
         repository = Path(__file__).resolve().parents[1]
         project_config = yaml.safe_load(
             (repository / PROJECT_CONFIG_PATH).read_text(encoding="utf-8")
@@ -786,6 +865,7 @@ class MatchedProductionTests(unittest.TestCase):
         return config, frame, protected
 
     def test_fresh_process_reproducibility_and_lf_events(self):
+        """Reproduce compact events in a fresh process with stable line endings."""
         repository = Path(__file__).resolve().parents[1]
         outputs = []
         with tempfile.TemporaryDirectory() as directory:
@@ -855,6 +935,7 @@ class MatchedProductionTests(unittest.TestCase):
             self.assertEqual(outputs[0], outputs[1])
 
     def test_separate_current_outputs_preserve_originals_without_a_phase3_notebook(self):
+        """Write revised outputs separately and preserve historical files."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _, _, protected = self.create_matched_fixture(root)
@@ -880,6 +961,7 @@ class MatchedProductionTests(unittest.TestCase):
                     run_phase3a_two_sided(root, invalid)
 
     def test_locked_runner_preserves_history_and_writes_validated_compact_outputs(self):
+        """Run the stable-cohort workflow and reject altered or stale prerequisites."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             config, frame, protected = self.create_matched_fixture(root)

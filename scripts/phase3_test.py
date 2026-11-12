@@ -1,4 +1,22 @@
-"""Canonical Phase 3 behavioral, saved-output, and replay verification."""
+"""Independently verify Phase 3 behavior, evidence, and saved-result replay.
+
+This module is the Phase 3 test/verification entry point, not the production
+monitor. Tests combine hand-calculated mathematical fixtures, synthetic
+protocol traces, integration checks, Phase 2/C0 equivalence, saved-bundle
+validation, deliberate corruption controls, and fresh-process reproducibility.
+The full-data oracle scores sampled root states but never supplies decisions to
+the simulated nodes or coordinators.
+
+``--checks behavior`` runs in-memory regression cases; ``saved`` checks current
+outputs without refreshing their receipt; ``replay`` performs isolated
+reproductions; ``--record-validation`` runs the required independent behavior,
+replay, and cross-phase suites and writes a receipt. Behavior, saved, and replay
+checks preserve scientific outputs; ``--report`` writes a separate verification
+report, and ``--record-validation`` writes the independent receipt. Failures,
+errors, skipped tests, stale provenance, or protected-file changes prevent a
+passing result. Production consumes this external, source-current receipt and
+does not run its own regression suite.
+"""
 
 import argparse
 import ast
@@ -79,12 +97,16 @@ evaluate_alpha_clustering = history_module.evaluate_alpha_clustering
 
 
 class ClusteringTests(unittest.TestCase):
+    """Check signed cancellation, greedy choices, alpha sensitivity, and ties."""
+
     def evaluate(self, histories, alpha=0.1):
+        """Normalize a synthetic history map and evaluate it at one alpha."""
         snapshot = normalize_sensor_histories(histories, tuple(histories))
         item = history_module.AlphaClusteringInput(1, 1, alpha, snapshot)
         return evaluate_alpha_clustering(item)
 
     def test_quality_formulas_preserve_signed_cancellation(self):
+        """Verify that cancellation is applied before absolute value and size cost."""
         values = {"A": 1.0, "B": -1.0, "C": 0.5}
         self.assertAlmostEqual(cluster_quality(("A", "B"), values, 0.1), 0.2)
         self.assertAlmostEqual(cluster_quality(("A", "C"), values, 0.1), 0.95)
@@ -94,6 +116,7 @@ class ClusteringTests(unittest.TestCase):
         self.assertNotEqual(cluster_quality(("A", "B"), values, 0.1), 1.2)
 
     def test_hand_calculated_merge_sequence_and_candidate_quality(self):
+        """Check each greedy merge and partition score against hand calculations."""
         result = self.evaluate({"A": 1.0, "B": -1.0, "C": 0.5, "D": -0.5})
         candidates = result["candidate_partitions"]
         self.assertEqual(
@@ -112,6 +135,7 @@ class ClusteringTests(unittest.TestCase):
         self.assertAlmostEqual(result["partition_quality"], 0.2)
 
     def test_partner_minimizes_merged_cluster_quality(self):
+        """Require the selected partner to minimize merged-cluster quality."""
         result = self.evaluate({"A": 1.0, "B": -0.1, "C": -0.2, "D": 0.9})
         first = result["merge_steps"][0]
         self.assertEqual(first["worst_cluster"], ("A",))
@@ -120,6 +144,7 @@ class ClusteringTests(unittest.TestCase):
         self.assertAlmostEqual(first["partner_scores"][1]["merged_quality"], 0.6)
 
     def test_earliest_minimum_wins_and_ties_are_deterministic(self):
+        """Preserve earliest minimum selection and canonical tie handling."""
         histories = {"A": 1.0, "B": -1.0, "C": 0.5, "D": -0.5}
         result = self.evaluate(histories, 0.9)
         self.assertEqual(result["selected_candidate_index"], 1)
@@ -131,6 +156,7 @@ class ClusteringTests(unittest.TestCase):
         self.assertEqual(tied["merge_steps"][0]["selected_partner"], ("B",))
 
     def test_alpha_sweep_remains_available_explicitly(self):
+        """Keep baseline alpha separate from the explicit 19-value sweep."""
         snapshot = normalize_sensor_histories(
             {"A": 0.6, "B": -0.3, "C": 0.15}, ("A", "B", "C")
         )
@@ -151,6 +177,7 @@ class ClusteringTests(unittest.TestCase):
         )
 
     def test_alpha_changes_partition_on_constructed_history_fixture(self):
+        """Show that alpha can change a constructed fixture's selected partition."""
         histories = {
             "A": 0.4440125386327938,
             "B": 0.39679908060749325,
@@ -168,6 +195,7 @@ class ClusteringTests(unittest.TestCase):
         self.assertEqual(partitions[0.50], (("A",), ("B",), ("C",), ("D",)))
 
     def test_invalid_quality_inputs_raise_explicit_errors(self):
+        """Reject invalid alpha, cluster membership, and incomplete partitions."""
         for alpha in (True, "0.1", float("nan"), float("inf"), -0.1, 1.1):
             with self.subTest(alpha=alpha), self.assertRaises(ValueError):
                 cluster_quality(("A",), {"A": 1.0}, alpha)
@@ -180,7 +208,10 @@ class ClusteringTests(unittest.TestCase):
 
 
 class NormalizationTests(unittest.TestCase):
+    """Check signed scaling, zero-history fallback, and invalid input rejection."""
+
     def test_all_zero_histories_use_deterministic_singleton_fallback(self):
+        """Use sorted singleton clusters without mutating an all-zero fixture."""
         histories = {"B": 0.0, "A": 0.0}
         snapshot = normalize_sensor_histories(histories, ("B", "A"))
         inputs = build_alpha_clustering_inputs(7, snapshot)
@@ -195,6 +226,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(histories, {"B": 0.0, "A": 0.0})
 
     def test_signed_normalization_uses_maximum_history_magnitude(self):
+        """Scale by the largest magnitude while preserving each history's sign."""
         snapshot = normalize_sensor_histories(
             {"A": 0.60, "B": -0.30, "C": 0.15, "D": 0.0},
             ("A", "B", "C", "D"),
@@ -207,6 +239,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(dict(snapshot.raw_histories)["B"], -0.30)
 
     def test_normalization_handles_tied_maximum_magnitudes(self):
+        """Normalize equal maximum magnitudes deterministically."""
         snapshot = normalize_sensor_histories(
             {"A": 0.6, "B": -0.6, "C": 0.3}, ("A", "B", "C")
         )
@@ -217,13 +250,17 @@ class NormalizationTests(unittest.TestCase):
         )
 
     def test_normalization_rejects_missing_or_nonfinite_histories(self):
+        """Fail on missing eligible sensors and non-finite history values."""
         for histories in ({"A": 1.0}, {"A": float("inf"), "B": 0.0}):
             with self.subTest(histories=histories), self.assertRaises(ValueError):
                 normalize_sensor_histories(histories, ("A", "B"))
 
 
 class Phase3AExecutionTests(unittest.TestCase):
+    """Verify locked inputs, history events, and matched Phase 2 summary rules."""
+
     def setUp(self):
+        """Create a three-bucket synthetic six-sensor Phase 3A configuration."""
         self.sensor_ids = ("A", "C", "D", "E", "F", "G")
         self.start = pd.Timestamp("2022-02-24T18:50:00+00:00")
         self.config = json.loads(json.dumps(PHASE3A_CONFIG))
@@ -244,6 +281,7 @@ class Phase3AExecutionTests(unittest.TestCase):
         self.frame = self.build_frame(3)
 
     def build_frame(self, count):
+        """Build contiguous finite observations for the configured fixture."""
         rows = []
         for offset in range(count):
             timestamp = self.start + pd.Timedelta(minutes=offset)
@@ -258,7 +296,9 @@ class Phase3AExecutionTests(unittest.TestCase):
         return pd.DataFrame(rows)
 
     def runtime(self, phase2_builder):
+        """Inject a controlled Phase 2 trace builder without changing production."""
         def build_events(*args, **kwargs):
+            """Bind the selected Phase 2 builder to the real event implementation."""
             return history_module.build_phase3a_history_events(
                 *args, phase2_builder=phase2_builder, **kwargs
             )
@@ -270,6 +310,7 @@ class Phase3AExecutionTests(unittest.TestCase):
 
     @staticmethod
     def controlled_phase2_builder(selected, _sensor_columns, _threshold):
+        """Return a hand-authored trace with initialization and one later sync."""
         return pd.DataFrame(
             {
                 "bucket_epoch": selected.bucket_epoch,
@@ -293,6 +334,7 @@ class Phase3AExecutionTests(unittest.TestCase):
         )
 
     def build_events(self, threshold=100.0, **kwargs):
+        """Build fixture events with the controlled Phase 2 synchronization trace."""
         runtime = self.runtime(self.controlled_phase2_builder)
         return runtime["build_phase3a_history_events"](
             self.frame,
@@ -302,6 +344,7 @@ class Phase3AExecutionTests(unittest.TestCase):
         )
 
     def test_production_baseline_alpha_and_history(self):
+        """Check fixed alpha, event timing, zero fallback, and discounted history."""
         events, baseline = self.build_events()
         self.assertEqual(len(events), 2)
         self.assertEqual(events.clustering_event_id.tolist(), [1, 2])
@@ -323,10 +366,12 @@ class Phase3AExecutionTests(unittest.TestCase):
         self.assertTrue(events.threshold_status.eq("authoritative").all())
 
     def test_phase2_rejects_a_threshold_that_disagrees_with_config(self):
+        """Reject a supplied threshold that differs from authoritative P90."""
         with self.assertRaisesRegex(ValueError, "does not match the authoritative"):
             self.build_events(threshold=100.5)
 
     def test_full_alpha_sweep_can_be_requested_for_tuning(self):
+        """Keep all 19 exploratory alpha values available on request."""
         events, _ = self.build_events(alpha_values=PHASE3_ALPHA_VALUES)
         self.assertEqual(len(events), 2 * len(PHASE3_ALPHA_VALUES))
         self.assertEqual(
@@ -337,6 +382,7 @@ class Phase3AExecutionTests(unittest.TestCase):
         )
 
     def test_phase3a_input_rejects_invalid_timestamps_and_values(self):
+        """Fail on gaps, duplicates, ordering errors, endpoint shifts, or row loss."""
         prepare = self.runtime(lambda *_: None)["prepare_phase3a_input"]
         selected = prepare(self.frame, self.config)
         self.assertEqual(len(selected), 3)
@@ -405,6 +451,7 @@ class Phase3AExecutionTests(unittest.TestCase):
             prepare(missing_column, self.config)
 
     def test_config_locks_cohort_and_authoritative_threshold_provenance(self):
+        """Reject cohort, threshold-source, and boundary-policy drift."""
         validate = self.runtime(lambda *_: None)["validate_phase3a_config"]
         self.assertEqual(validate(PHASE3A_CONFIG)[0], ("A", "C", "D", "E", "F", "G"))
         self.assertEqual(PHASE3A_CONFIG["baseline_alpha"], 0.1)
@@ -425,6 +472,7 @@ class Phase3AExecutionTests(unittest.TestCase):
             validate(modified)
 
     def test_project_configuration_is_single_canonical_file_without_retired_settings(self):
+        """Keep experiment settings in the canonical config without retired keys."""
         config_files = sorted(path.name for path in CONFIG_PATH.parent.iterdir() if path.is_file())
         self.assertEqual(config_files, ["project_config.yaml"])
         project_config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -434,6 +482,7 @@ class Phase3AExecutionTests(unittest.TestCase):
         self.assertNotIn("phase2_aligned", project_config["artifacts"])
 
     def test_matched_phase2_summary_counts_and_reconciles_messages(self):
+        """Check baseline counts and reject membership or ledger inconsistencies."""
         runtime = self.runtime(self.controlled_phase2_builder)
         trace = self.controlled_phase2_builder(self.frame, [], 100.0)
         summary = runtime["build_phase3a_phase2_baseline_summary"](trace, self.config)
@@ -462,10 +511,13 @@ class Phase3AExecutionTests(unittest.TestCase):
 
 
 def paired_clustering(_):
+    """Return one deterministic paired cluster for synthetic protocol fixtures."""
     return {"selected_partition": (("A", "B"),), "partition_quality": 0.2}
 
 
 class FirstMomentTests(unittest.TestCase):
+    """Check FMIC first-moment recurrence, scaling, budgets, and input guards."""
+
     def test_discounted_arithmetic_mean_is_not_history_or_ema(self):
         """Chapter section 1.4, printed p.10/PDF p.14: arithmetic mean of V'_n."""
         state = DiscountedFirstMoment(("A", "B"))
@@ -490,6 +542,7 @@ class FirstMomentTests(unittest.TestCase):
         self.assertNotAlmostEqual(state.means()["A"], 8.5 / (0.25 + 0.5 + 1))
 
     def test_hand_calculated_weights_and_cluster_allowances(self):
+        """Reconcile hand-computed scaled weights and node/coordinator budgets."""
         result = fmic_allocation(
             {"A": -1, "B": 2, "C": 3}, (("A", "B"), ("C",)), 4
         )
@@ -506,6 +559,7 @@ class FirstMomentTests(unittest.TestCase):
         )
 
     def test_project_all_zero_fallback_and_individual_zero(self):
+        """Apply equal weights only to an all-zero set, not to one zero sensor."""
         result = fmic_allocation({"A": 0, "B": 0}, (("A", "B"),), 3)
         self.assertEqual(result["scaled_weights"], {"A": 1, "B": 1})
         self.assertEqual(result["node_allowances"], {"A": 3, "B": 3})
@@ -517,6 +571,7 @@ class FirstMomentTests(unittest.TestCase):
         self.assertEqual(result["weight_status"], "source_first_moment")
 
     def test_invalid_inputs_are_explicit(self):
+        """Reject empty/non-finite moments and malformed or negative budgets."""
         for moments, partition, allowance in (
             ({}, (), 1),
             ({"A": math.nan}, (("A",),), 1),
@@ -530,6 +585,8 @@ class FirstMomentTests(unittest.TestCase):
 
 
 class SecondMomentTests(unittest.TestCase):
+    """Check SMIC's persistent unnormalized discounted squared-deviation state."""
+
     def test_source_discounted_squared_deviations_and_weights_by_hand(self):
         """Appendix 1 pp.22,24/PDF 26,28: sigma^2 has NO m or m-1 divisor."""
         state = DiscountedSecondMoment(("A", "B"))
@@ -566,6 +623,7 @@ class SecondMomentTests(unittest.TestCase):
                     self.assertAlmostEqual(allocation["raw_weights"][sensor], weights[sensor], delta=1e-12)
 
     def test_running_state_matches_explicit_discounted_set(self):
+        """Compare online moments with the explicit discounted vector set."""
         state = DiscountedSecondMoment(("A",))
         vectors = []
         generator = random.Random(320)
@@ -582,6 +640,7 @@ class SecondMomentTests(unittest.TestCase):
         self.assertEqual(set(vars(state)), {"sums", "count", "second_moments"})
 
     def test_initialization_singleton_zero_fallback_and_individual_zero(self):
+        """Check initial/singleton states and distinct zero-weight fallback cases."""
         state = DiscountedSecondMoment(("A", "B"))
         for count in (0, 1, 2):
             if count:
@@ -602,6 +661,7 @@ class SecondMomentTests(unittest.TestCase):
         self.assertEqual(result["raw_weights"], {"A": 2, "B": 2})
 
     def test_hand_calculated_budget_and_cluster_means(self):
+        """Reconcile conservative terms and coordinator budgets by hand."""
         result = smic_allocation(
             {"A": -1, "B": 2, "C": 3}, {"A": 2, "B": 8, "C": 18},
             2, (("A", "B"), ("C",)), 4,
@@ -614,6 +674,7 @@ class SecondMomentTests(unittest.TestCase):
         self.assertEqual(result["coordinator_allowances"], {"B": 3, "C": 6})
 
     def test_invalid_second_moments_counts_and_overflow_are_explicit(self):
+        """Reject invalid moment state, counts, and non-finite updates."""
         for means, seconds, count in (
             ({"A": 1}, {"A": -1e-16}, 2),
             ({"A": 1}, {"A": math.inf}, 2),
@@ -640,19 +701,24 @@ class SecondMomentTests(unittest.TestCase):
 
 
 class FMICProtocolTests(unittest.TestCase):
+    """Exercise entry-state timing, local checks, escalation, and message counts."""
+
     weight_method = "FMIC"
 
     def monitor(self, threshold=1):
+        """Create a two-node monitor using the deterministic paired cluster."""
         return FMICMonitor(
             ("A", "B"), threshold, clustering=paired_clustering,
             weight_method=self.weight_method,
         )
 
     def step(self, monitor, a, b):
+        """Advance the fixture monitor by one timestamped two-sensor bucket."""
         index = monitor.rows
         return monitor.step({"A": a, "B": b}, f"row-{index}", index * 60)
 
     def test_no_trigger_and_initialization(self):
+        """Count initial collection once and require silent stable buckets afterward."""
         monitor = self.monitor()
         initial = self.step(monitor, 0, 0)
         self.assertEqual(initial["total_messages"], 6)
@@ -668,6 +734,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(monitor.summary()["root_synchronization_count"], 1)
 
     def test_decision_trace_captures_entry_state_triggers_and_next_bucket_updates(self):
+        """Separate the state used for a decision from state installed after sync."""
         monitor = FMICMonitor(
             ("A", "B"), 1, clustering=paired_clustering, capture_decisions=True
         )
@@ -688,7 +755,9 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(synchronized["total_messages"], sum(synchronized["messages"].values()))
 
     def test_global_mean_uses_phase2_ordered_builtin_sum(self):
+        """Preserve the comparator's ordered summation near floating-point limits."""
         def singleton_partition(_):
+            """Keep all test sensors independent for this arithmetic case."""
             return {
                 "selected_partition": (("A",), ("B",), ("C",)),
                 "partition_quality": 0.0,
@@ -709,10 +778,12 @@ class FMICProtocolTests(unittest.TestCase):
         )
 
     def test_fresh_alpha_runs_are_independent_of_iteration_order(self):
+        """Prove alpha evaluations start from independent monitor state."""
         alphas = tuple(step / 20 for step in range(1, 20))
         observations = ((0, 0), (0.1, -0.1), (0.25, -0.2), (-0.1, 0.3))
 
         def run_in_order(values):
+            """Run each requested alpha from a newly initialized monitor."""
             output = {}
             for alpha in values:
                 monitor = FMICMonitor(
@@ -735,6 +806,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(forward, reverse)
 
     def test_safe_cancellation_and_unsafe_partial_cancellation_hand_count(self):
+        """Distinguish locally resolved cancellation from escalation by ledger."""
         monitor = self.monitor()
         self.step(monitor, 0, 0)
         safe = self.step(monitor, 1.5, -0.75)
@@ -761,6 +833,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(summary["root_synchronization_count"], 2)
 
     def test_coordinator_trigger_collects_peer_not_itself(self):
+        """Require one coordinator to collect only the non-triggering peer."""
         monitor = self.monitor()
         self.step(monitor, 0, 0)
         row = self.step(monitor, -0.75, 1.5)
@@ -771,6 +844,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertFalse(row["synchronized"])
 
     def test_collection_and_escalation_complete_hand_count(self):
+        """Reconcile trigger, peer-check, escalation, and root-collection messages."""
         monitor = self.monitor()
         self.step(monitor, 0, 0)  # 2 requests + 2 responses + 2 updates.
         self.step(monitor, -0.75, 1.5)  # Coordinator asks A: request + response.
@@ -783,6 +857,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(monitor.summary()["total_messages"], 16)
 
     def test_explicit_transmission_ledger_matches_categories(self):
+        """Match every one-way transmission to exactly one recorded category."""
         monitor = self.monitor()
         self.step(monitor, 0, 0)
         self.step(monitor, 1.5, -0.75)
@@ -811,6 +886,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(len(ledger), monitor.summary()["total_messages"])
 
     def test_singleton_cluster_does_not_send_peer_or_self_messages(self):
+        """Exclude peer/self traffic while retaining escalation and root messages."""
         monitor = FMICMonitor(("A",), 1, weight_method=self.weight_method)
         initial = monitor.step({"A": 0}, "row-0", 0)
         self.assertEqual(initial["total_messages"], 3)
@@ -831,6 +907,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(row["total_messages"], 4)
 
     def test_simultaneous_triggers_do_not_duplicate_cluster_or_root_checks(self):
+        """Count one cluster check and one root collection per triggered cluster."""
         monitor = self.monitor()
         self.step(monitor, 0, 0)
         row = self.step(monitor, 1, 1)
@@ -847,6 +924,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(row["total_messages"], 8)
 
     def test_coordinator_and_node_boundary_below_equal_above(self):
+        """Apply the inclusive node/coordinator trigger boundary at equality."""
         for value, expected in (
             (math.nextafter(1.0, 0), False), (1.0, True),
             (math.nextafter(1.0, math.inf), True),
@@ -859,6 +937,7 @@ class FMICProtocolTests(unittest.TestCase):
                 self.assertEqual(row["global_violated"], expected)
 
     def test_global_boundary_and_violated_to_safe_crossing(self):
+        """Treat equality as VIOLATED and detect a subsequent SAFE crossing."""
         monitor = self.monitor()
         self.step(monitor, 2, 2)
         self.assertTrue(monitor.known_violated)
@@ -873,6 +952,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertFalse(below["known_violated"])
 
     def test_history_and_first_moment_persist_across_sync(self):
+        """Check that synchronization refreshes references but not history/moments."""
         monitor = self.monitor()
         self.step(monitor, 0, 0)
         self.step(monitor, 1.5, -0.75)
@@ -888,6 +968,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(monitor.moment.means(), {"A": 5.875 / 3, "B": 0.8125 / 3})
 
     def test_centralized_truth_never_drives_protocol_and_false_safe_blocks(self):
+        """Show that an offline false-safe is detected after protocol decisions."""
         monitor = self.monitor()
         self.step(monitor, 0, 0)
         monitor.allocation["node_allowances"] = {"A": 100, "B": 100}
@@ -899,6 +980,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(summary["correctness_status"], "failed")
 
     def test_many_synthetic_crossings_use_real_clustering_and_zero_false_safe(self):
+        """Exercise full clustering on deterministic synthetic crossings."""
         generator = random.Random(7319)
         monitor = FMICMonitor(tuple("ACDEFG"), 0.5)
         violations = 0
@@ -918,6 +1000,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(summary["total_messages"], sum(monitor.messages.values()))
 
     def test_correctness_status_requires_zero_mismatches_in_both_directions(self):
+        """Require both false-safe and false-violated counts to be zero."""
         for false_safe, false_violated, expected in (
             (0, 0, "passed"),
             (1, 0, "failed"),
@@ -935,6 +1018,7 @@ class FMICProtocolTests(unittest.TestCase):
                 self.assertEqual(summary["correctness_status"], expected)
 
     def test_false_violated_observation_fails_summary_without_false_safe(self):
+        """Fail correctness when root-known state is violated but truth is safe."""
         monitor = self.monitor()
         self.step(monitor, 2, 2)
         monitor.allocation["node_allowances"] = {"A": 100, "B": 100}
@@ -948,6 +1032,7 @@ class FMICProtocolTests(unittest.TestCase):
         self.assertEqual(summary["correctness_status"], "failed")
 
     def test_invalid_readings_fail_before_processing(self):
+        """Reject missing, extra, non-numeric, and non-finite sensor readings."""
         monitor = self.monitor()
         for readings in (
             {"A": 1}, {"A": 1, "B": math.inf},
@@ -959,7 +1044,10 @@ class FMICProtocolTests(unittest.TestCase):
 
 
 class ProductionIntegrationTests(unittest.TestCase):
+    """Check import safety, isolated publication, and legacy runner compatibility."""
+
     def test_only_three_phase3_executable_files_remain(self):
+        """Keep the maintained Phase 3 implementation/test/analysis surface exact."""
         repository = Path(__file__).resolve().parents[1]
         self.assertEqual(
             {path.name for path in (repository / "scripts").iterdir()
@@ -975,6 +1063,7 @@ class ProductionIntegrationTests(unittest.TestCase):
             self.assertEqual(getattr(history_module, name).__module__, "scripts.phase3_implement")
 
     def test_clean_process_import_does_not_read_inputs_or_execute_or_write_outputs(self):
+        """Verify a fresh import does not load data, run experiments, or write files."""
         repository = Path(__file__).resolve().parents[1]
         code = """
 import builtins
@@ -1023,6 +1112,7 @@ print("import-safe")
             self.assertEqual(list(Path(temporary).iterdir()), [])
 
     def test_runner_validates_provenance_preserves_baseline_and_exports_only_compact_files(self):
+        """Exercise legacy FMIC/SMIC publication without altering reference evidence."""
         repository = Path(__file__).resolve().parents[1]
         project_config = yaml.safe_load(
             (repository / PROJECT_CONFIG_PATH).read_text(encoding="utf-8")
@@ -1228,6 +1318,7 @@ print("import-safe")
                 run_phase3a_smic(root)
 
     def test_fmic_synthetic_protocol_matches_pre_smic_fingerprint(self):
+        """Protect the deterministic FMIC protocol fingerprint for a fixed fixture."""
         generator = random.Random(7320)
         monitor = FMICMonitor(tuple("ACDEFG"), 0.5)
         rows = []
@@ -1240,14 +1331,16 @@ print("import-safe")
 
 
 class SMICProtocolTests(FMICProtocolTests):
-    """Run the same hand-counted protocol/boundary/failure cases with SMIC."""
+    """Inherit FMIC protocol cases and add SMIC-specific moment checks."""
 
     weight_method = "SMIC"
 
     def monitor(self, threshold=1):
+        """Create the shared protocol monitor with SMIC moment allocation."""
         return FMICMonitor(("A", "B"), threshold, clustering=paired_clustering, weight_method="SMIC")
 
     def test_history_and_first_moment_persist_across_sync(self):
+        """Verify SMIC first/second moments and signed history persist together."""
         super().test_history_and_first_moment_persist_across_sync()
         monitor = self.monitor(threshold=11)
         observations = ((10, 10), (11.5, 9.25), (13, 10), (14, 11), (8, 8))
@@ -1278,6 +1371,7 @@ class SMICProtocolTests(FMICProtocolTests):
         self.assertNotEqual(monitor.history.histories, monitor.moment.means())
 
     def test_many_synthetic_crossings_use_real_clustering_and_zero_false_safe(self):
+        """Exercise SMIC on a deterministic stream with two-sided correctness."""
         generator = random.Random(7320)
         monitor = FMICMonitor(tuple("ACDEFG"), 0.5, weight_method="SMIC")
         for index in range(500):
@@ -1291,7 +1385,9 @@ class SMICProtocolTests(FMICProtocolTests):
         self.assertEqual(summary["total_messages"], sum(summary["message_category_totals"].values()))
 
     def test_identical_allocations_give_identical_shared_engine_decisions(self):
+        """Isolate weight-method effects by injecting identical allocations."""
         def fixed_strategy(moment, partition, root_allowance):
+            """Return equal FMIC/SMIC allocations for protocol comparison."""
             return {
                 **fmic_allocation({"A": 1, "B": 1}, partition, root_allowance),
                 "second_moments": dict.fromkeys(moment.sums, 0),
@@ -1311,6 +1407,7 @@ class SMICProtocolTests(FMICProtocolTests):
             self.assertEqual(monitors[0].references, monitors[1].references)
 
     def test_weight_method_is_validated(self):
+        """Reject unsupported moment methods before monitor initialization."""
         with self.assertRaisesRegex(ValueError, "weight_method"):
             FMICMonitor(("A", "B"), 1, weight_method="OTHER")
 
@@ -1322,6 +1419,7 @@ FMIC_MONITOR, _ = load_phase3_monitor()
 
 
 def build_fixture(values, threshold, sensor_ids=None):
+    """Build matching Phase 2/C0 traces from synthetic row-major readings."""
     if sensor_ids is None:
         sensor_ids = tuple(chr(ord("A") + index) for index in range(len(values[0])))
     columns = [f"{sensor}_temperature" for sensor in sensor_ids]
@@ -1335,7 +1433,10 @@ def build_fixture(values, threshold, sensor_ids=None):
 
 
 class SyntheticProtocolTests(unittest.TestCase):
+    """Test full-bucket Phase 2/C0 equivalence and intentionally damaged traces."""
+
     def test_initialization_and_silent_safe_or_violated_operation(self):
+        """Compare initialization and silent SAFE/VIOLATED states bucket by bucket."""
         for values, threshold, expected_state in (
             ([[1, 1], [1, 1], [1, 1]], 10, "SAFE"),
             ([[2, 2], [2, 2], [2, 2]], 0, "VIOLATED"),
@@ -1354,6 +1455,7 @@ class SyntheticProtocolTests(unittest.TestCase):
                 self.assertEqual(phase3.summary()["root_synchronization_count"], 1)
 
     def test_warming_and_cooling_crossings_are_detected_on_crossing_bucket(self):
+        """Detect SAFE-to-VIOLATED and VIOLATED-to-SAFE transitions at the crossing."""
         for values, expected_initial, expected_crossing in (
             ([[9, 9], [10, 10]], "SAFE", "VIOLATED"),
             ([[11, 11], [9, 9]], "VIOLATED", "SAFE"),
@@ -1370,6 +1472,7 @@ class SyntheticProtocolTests(unittest.TestCase):
                 self.assertTrue(phase3.decision_trace[1]["synchronized"])
 
     def test_exact_global_local_and_zero_allowance_boundaries(self):
+        """Check inclusive boundaries and unchanged readings at zero allowance."""
         for value, expected_state in (
             (float.fromhex("0x1.3ffffffffffffp+4"), "SAFE"),
             (20.0, "VIOLATED"),
@@ -1410,6 +1513,7 @@ class SyntheticProtocolTests(unittest.TestCase):
         self.assertEqual(below_phase3.decision_trace[1]["triggering_sensor_ids"], ())
 
     def test_simultaneous_singleton_triggers_create_one_root_collection(self):
+        """Ensure concurrent singleton triggers share one root-wide collection."""
         _, _, phase2, phase3, comparison = build_fixture(
             [[0, 0, 0], [2, 2, 2]], 2, ("A", "B", "C")
         )
@@ -1427,6 +1531,7 @@ class SyntheticProtocolTests(unittest.TestCase):
         self.assertEqual(phase3.summary()["root_synchronization_count"], 2)
 
     def test_consecutive_syncs_and_long_silent_gaps(self):
+        """Compare repeated synchronizations and long intervals without triggers."""
         _, _, consecutive_phase2, consecutive_phase3, consecutive = build_fixture(
             [[0, 0], [1, 1], [1, 1], [1, 1]], 1
         )
@@ -1448,6 +1553,7 @@ class SyntheticProtocolTests(unittest.TestCase):
         )
 
     def test_hand_counted_two_sensor_transmission_ledger(self):
+        """Match a compact two-sensor exchange to its one-way message ledger."""
         _, _, phase2, phase3, comparison = build_fixture(
             [[0, 0], [1, 1]], 1, ("A", "B")
         )
@@ -1493,6 +1599,7 @@ class SyntheticProtocolTests(unittest.TestCase):
         self.assertEqual(len(ledger), phase3.summary()["total_messages"])
 
     def test_checker_detects_stale_reference_dropped_alert_and_status_defects(self):
+        """Inject stale state, a dropped alert, and a wrong status for diagnostics."""
         frame, columns, phase2, phase3, passing = build_fixture(
             [[0, 0], [1, 1], [2, 0]], 1, ("A", "B")
         )
@@ -1523,6 +1630,7 @@ class SyntheticProtocolTests(unittest.TestCase):
         self.assertEqual(root_correctness_summary(false_violated_rows)["false_violated_count"], 1)
 
     def test_trace_length_mismatch_returns_failed_comparison_schema(self):
+        """Fail equivalence when one trace omits a bucket."""
         _, columns, phase2, phase3, passing = build_fixture(
             [[0, 0], [1, 1], [2, 0]], 1, ("A", "B")
         )
@@ -1544,6 +1652,7 @@ class SyntheticProtocolTests(unittest.TestCase):
         self.assertEqual(result["first_mismatch"]["observed"], 2)
 
     def test_empty_sync_timeline_fails_with_diagnostic_and_numeric_tolerance_is_continuous_only(self):
+        """Reject absent event evidence and constrain numeric comparison tolerance."""
         empty_phase2 = pd.DataFrame(
             columns=[
                 "bucket_epoch",
@@ -1583,6 +1692,7 @@ class SyntheticProtocolTests(unittest.TestCase):
         )
 
     def test_singleton_event_and_peer_failures_have_actionable_diagnostics(self):
+        """Locate missing singleton events and peer-message errors by field/bucket."""
         _, columns, phase2, phase3, passing = build_fixture(
             [[0, 0], [1, 1], [2, 0]], 1, ("A", "B")
         )
@@ -1654,12 +1764,16 @@ class SyntheticProtocolTests(unittest.TestCase):
                     )
 
     def test_production_runner_writes_failed_summary_and_returns_nonzero(self):
+        """Keep failed candidate status explicit and return a nonzero result."""
         _, phase3_categories = load_phase3_monitor()
         monitor_class, _ = load_phase3_monitor()
         final_epoch = int(pd.Timestamp("2022-03-10T15:53:00+00:00").timestamp())
 
         class MissingFinalDecisionMonitor(monitor_class):
+            """Inject a test-only monitor that omits its final bucket decision."""
+
             def step(self, *args, **kwargs):
+                """Return no decision for the designated last fixture bucket."""
                 result = super().step(*args, **kwargs)
                 epoch = args[2] if len(args) > 2 else kwargs["epoch"]
                 if int(epoch) == final_epoch:
@@ -1691,6 +1805,7 @@ class SyntheticProtocolTests(unittest.TestCase):
             self.assertEqual(summary["comparison"]["actual_trace_length"], 19983)
 
     def test_fresh_monitors_have_independent_deterministic_state(self):
+        """Confirm separate monitors replay the same fixture without shared state."""
         observations = [[0, 0], [1, 1], [1.5, 0.5], [2, 0]]
         first = build_fixture(observations, 1)[3]
         second = build_fixture(observations, 1)[3]
@@ -1701,7 +1816,10 @@ class SyntheticProtocolTests(unittest.TestCase):
 
 
 class ProductionReproducibilityTests(unittest.TestCase):
+    """Check deterministic outputs from an independently launched process."""
+
     def test_fresh_process_reproduction(self):
+        """Compare clean-process results with independent in-process references."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             output_dirs = [root / "first", root / "second"]
@@ -1757,6 +1875,7 @@ ENGINE = _load_engine()
 
 
 def frame(rows, sensors=("A", "B")):
+    """Build timestamped sensor rows and return the frame with its columns."""
     columns = [f"{sensor}_temperature" for sensor in sensors]
     data = pd.DataFrame(rows, columns=columns)
     data.insert(0, "bucket_epoch", [index * 60 for index in range(len(rows))])
@@ -1765,7 +1884,9 @@ def frame(rows, sensors=("A", "B")):
 
 
 def weighted_allocation(engine, weights):
+    """Create a deterministic allocator for supplied synthetic weights."""
     def allocate(moment, partition, root_allowance):
+        """Apply the fixed fixture weights to the requested partition and budget."""
         result = engine.allocate_moment_weights(
             weights, partition, root_allowance, "test_fixed_moment_weights"
         )
@@ -1776,7 +1897,10 @@ def weighted_allocation(engine, weights):
 
 
 class CompositionTests(unittest.TestCase):
+    """Verify message pathways, category arithmetic, and matched comparisons."""
+
     def test_pathway_counts_and_shares_reconcile_by_independent_arithmetic(self):
+        """Recompute exclusive pathway counts and shares from message categories."""
         result = _composition({
             "node_trigger_messages": 2,
             "cluster_check_requests": 3,
@@ -1801,6 +1925,7 @@ class CompositionTests(unittest.TestCase):
         )
 
     def test_negative_or_mismatched_message_categories_fail(self):
+        """Reject negative categories and totals that fail ledger reconciliation."""
         categories = {
             "node_trigger_messages": 0,
             "cluster_check_requests": 0,
@@ -1819,7 +1944,9 @@ class CompositionTests(unittest.TestCase):
         self.assertIsNone(zero["within_cluster_messages_share_percent"])
 
     def test_comparison_outputs_include_pathways_and_matched_baseline(self):
+        """Require comparison rows to use the revised matched Phase 2 denominator."""
         def row(config_id, algorithm, messages):
+            """Build one synthetic configuration row with reconciled categories."""
             categories = {
                 "node_trigger_messages": 1 if config_id != "C0" else 0,
                 "cluster_check_requests": 1 if algorithm == "FMIC" else 0,
@@ -1892,7 +2019,10 @@ class CompositionTests(unittest.TestCase):
 
 
 class ControlAndDiagnosticTests(unittest.TestCase):
+    """Protect controls, alpha isolation, validation gates, and failure evidence."""
+
     def test_output_directory_is_isolated_and_cannot_target_sources_or_checkpoint(self):
+        """Reject production destinations that overlap source or sealed evidence."""
         root = Path(__file__).resolve().parents[1]
         self.assertEqual(
             implementation._resolve_output_dir(root, None),
@@ -1910,6 +2040,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
                 implementation._resolve_output_dir(root, path)
 
     def test_external_validation_record_rejects_missing_stale_failed_or_incomplete_evidence(self):
+        """Require a complete passing receipt with matching source provenance."""
         root = Path(__file__).resolve().parents[1]
         modules = [
             f"scripts.{Path(name).stem}" for name in implementation.VALIDATION_TEST_MODULES
@@ -1949,6 +2080,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
                         implementation._read_validation_record(root, path)
 
     def test_c0_is_regenerated_when_stale_then_reused_only_with_matching_events_and_provenance(self):
+        """Regenerate stale C0 and reuse it only after hash/event checks pass."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "artifacts").mkdir()
@@ -1960,6 +2092,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             summary_path.write_text(json.dumps({"status": "passed", "provenance": {"stale": True}}))
 
             def fresh(_root, directory):
+                """Replace stale fixture evidence with current isolated equivalence."""
                 self.assertEqual(directory, output)
                 events_path.write_text("fresh event")
                 report = {
@@ -1989,6 +2122,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
                 self.assertEqual(generate.call_count, 2)
 
     def test_failed_fresh_c0_blocks_controls_without_marking_tests_as_executed(self):
+        """Stop production when fresh equivalence fails before controls execute."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "artifacts").mkdir()
@@ -2008,6 +2142,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
                 controls.assert_not_called()
 
     def test_missing_validation_record_persists_failure_only_in_candidate_directory(self):
+        """Record a missing-receipt failure in the candidate, not canonical outputs."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "artifacts").mkdir()
@@ -2034,6 +2169,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             self.assertNotIn("comparison", run)
 
     def test_production_has_no_test_import_or_test_suite_launcher(self):
+        """Keep regression execution external to the production process."""
         tree = ast.parse(Path(implementation.__file__).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -2043,10 +2179,13 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         self.assertFalse(hasattr(implementation, "_run_validation_tests"))
 
     def test_validation_producer_records_real_test_outcome_and_input_stability(self):
+        """Record genuine suite results and protected-input stability in the receipt."""
         def fail():
+            """Raise an injected assertion so a failed suite cannot pass validation."""
             raise AssertionError("injected fixture failure")
 
         def skipped():
+            """Raise an injected skip so skipped validation is recorded as failure."""
             raise unittest.SkipTest("injected missing prerequisite")
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -2072,6 +2211,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
                     self.assertEqual(returncode, 0 if expected == "passed" else 1)
 
     def test_prerequisite_gate_requires_current_implementation_hash(self):
+        """Reject a validation receipt whose implementation identity is stale."""
         expected = {"phase3_implementation_sha256": "current", "input_sha256": "input"}
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "events.csv"
@@ -2092,6 +2232,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             self.assertFalse(implementation._equivalence_is_current(report, path, expected))
 
     def test_singleton_weighting_controls_keep_alpha_out_of_decisions(self):
+        """Verify C1/C2 change weights while singleton decisions ignore alpha."""
         data, columns = frame([[0, 0], [1.5, -0.75], [2, 0]])
         outputs = []
         for alpha in (0.05, 0.95):
@@ -2117,6 +2258,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         )
 
     def test_same_weights_distinct_partition_changes_only_check_protocol(self):
+        """Hold allocations constant to isolate the effect of clustering geometry."""
         columns = ["A_temperature", "B_temperature"]
         allocate = weighted_allocation(ENGINE, {"A": 1.0, "B": 1.0})
         scenarios = (
@@ -2222,6 +2364,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             )
 
     def test_alpha_sensitive_source_clustering_receives_alpha(self):
+        """Pass each requested alpha into the source clustering evaluation."""
         sensor_ids = ("A", "B", "C", "D", "E", "F")
         histories = dict(zip(sensor_ids, (1.0, -0.5, 0.25, 0.5, -1.0, 0.75)))
         snapshot = ENGINE.normalize_sensor_histories(histories, sensor_ids)
@@ -2239,6 +2382,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         )
 
     def test_alpha_runs_are_independent_of_execution_order(self):
+        """Require reproducible results regardless of alpha iteration order."""
         sensor_ids = ("A", "B", "C", "D", "E", "F")
         readings = [
             [0, 0, 0, 0, 0, 0],
@@ -2249,6 +2393,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         data, columns = frame(readings, sensor_ids)
 
         def replay(order):
+            """Run each alpha with fresh state in the supplied order."""
             output = {}
             for alpha in order:
                 summary, _, events = _run_monitor(
@@ -2276,6 +2421,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         )
 
     def test_alpha_grid_is_complete_and_excludes_invalid_runs(self):
+        """Require all approved grid values and reject missing/invalid outcomes."""
         rows = []
         for method in ("FMIC", "SMIC"):
             for alpha in ALPHA_LABELS:
@@ -2301,6 +2447,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             _validate_alpha_grid(invalid_rows)
 
     def test_failed_runner_persists_diagnostic_without_success_report(self):
+        """Persist failed-run diagnostics without a success-shaped completion."""
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             (root / "artifacts").mkdir()
@@ -2312,10 +2459,12 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             original_hashes = _protected_hashes
 
             def record_hashes(path):
+                """Record that protected files are inventoried before validation."""
                 call_order.append("protected_hashes")
                 return original_hashes(path)
 
             def fail_contract(_path):
+                """Inject a prerequisite failure after the initial inventory."""
                 call_order.append("contract_validation")
                 raise ValueError("injected prerequisite failure")
 
@@ -2348,6 +2497,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             )
 
     def test_repeated_local_checks_count_once_and_reset_after_sync(self):
+        """Count adjacent local checks as repeats and reset the streak at sync."""
         data, columns = frame([
             [8, 8, 8],
             [10, 6, 8],
@@ -2396,6 +2546,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         self.assertEqual(summary["total_messages"], 43)
 
     def test_nonconsecutive_check_is_not_counted_as_repeated(self):
+        """Exclude separated checks from the adjacent-bucket repeat count."""
         data, columns = frame([[8, 8], [10, 6], [8, 8], [10, 6]])
         summary, _, _ = _run_monitor(
             ENGINE.FMICMonitor,
@@ -2415,6 +2566,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         self.assertEqual(summary["repeated_coordinator_check_count"], 0)
 
     def test_zero_allowance_unchanged_and_both_crossing_directions(self):
+        """Preserve zero-allowance triggers and detect both state crossings."""
         data, columns = frame([[10, 10], [10, 10], [11, 11], [9, 9]])
         summary, _, events = _run_monitor(
             ENGINE.FMICMonitor,
@@ -2436,6 +2588,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         self.assertEqual(summary["total_messages"], 30)
 
     def test_zero_weight_sensor_triggers_with_positive_root_allowance(self):
+        """Retain zero-weight sensor behavior under a positive root allowance."""
         data, columns = frame([[0, 0], [0, 0]])
         summary, by_size, _ = _run_monitor(
             ENGINE.FMICMonitor,
@@ -2527,11 +2680,13 @@ CROSS_PHASE_MODULES = [
 
 
 def _require(condition, message):
+    """Raise an assertion with a specific saved-output validation diagnostic."""
     if not condition:
         raise ValueError(message)
 
 
 def _number(value, label, *, integer=False, nonnegative=False):
+    """Parse one finite result value and enforce its requested numeric form."""
     _require(not isinstance(value, bool), f"{label}: boolean is not a number")
     try:
         result = float(value)
@@ -2546,6 +2701,7 @@ def _number(value, label, *, integer=False, nonnegative=False):
 
 
 def _same_number(actual, expected, label):
+    """Compare reported and independently derived values by the verifier tolerance."""
     _require(
         math.isclose(_number(actual, label), expected, rel_tol=1e-12, abs_tol=1e-10),
         f"{label}: {actual!r} does not reconcile with {expected!r}",
@@ -2553,6 +2709,7 @@ def _same_number(actual, expected, label):
 
 
 def _csv_rows(path, schema):
+    """Read nonempty CSV rows after enforcing the exact column set."""
     with path.open(newline="", encoding="utf-8") as stream:
         reader = csv.DictReader(stream)
         _require(
@@ -2571,6 +2728,7 @@ def _csv_rows(path, schema):
 
 
 def _result_key(row):
+    """Return the configuration/alpha key used to index result tables."""
     return row["config_id"], row["alpha_label"]
 
 
@@ -2611,6 +2769,7 @@ def _write_reference_tables(directory):
 
 
 def _verify_result_tables(directory, bucket_count, violation_count):
+    """Reconcile table schemas, configurations, correctness, and message arithmetic."""
     rows = _csv_rows(
         directory / implementation.RESULTS_PATH,
         RESULT_SCHEMA | CONTRAST_FIELDS | {"configuration_kind"},
@@ -2766,6 +2925,7 @@ def _verify_result_tables(directory, bucket_count, violation_count):
 
 
 def _source_observations():
+    """Load authoritative inputs and independently compute cohort truth values."""
     contract = implementation._validate_contract(ROOT)
     config = contract["config"]
     data = pd.read_csv(contract["input_path"], float_precision="round_trip")
@@ -2781,6 +2941,7 @@ def _source_observations():
 
 
 def _verify_saved_provenance(directory, report):
+    """Check that the saved run references current source and validation evidence."""
     operational = implementation._resolve_operational_dir(directory)
     validation = report["validation"]
     _require(
@@ -2815,6 +2976,7 @@ def _verify_saved_provenance(directory, report):
 
 
 def _verify_snapshots(directory, indexed, contract, averages):
+    """Validate compact snapshots against source observations and run summaries."""
     fields = {
         "config_id", "alpha_label", "snapshot_type", "synchronization_id", "bucket_epoch",
         "bucket_time_utc", "algorithm", "selected_partition", "selected_partition_quality",
@@ -2906,6 +3068,7 @@ def _verify_snapshots(directory, indexed, contract, averages):
 
 
 def _directory_hashes(directory):
+    """Hash all files under one saved-results directory using relative paths."""
     _require(directory.is_dir(), f"Saved-output directory does not exist: {directory}")
     return {
         str(path.relative_to(directory)): implementation._sha256(path)
@@ -2914,6 +3077,7 @@ def _directory_hashes(directory):
 
 
 def _paired_directory_hashes(directory):
+    """Hash result and operational folders as one protected evidence bundle."""
     hashes = _directory_hashes(directory)
     operational = implementation._resolve_operational_dir(directory)
     if operational.is_dir() and not operational.is_relative_to(directory):
@@ -3016,6 +3180,7 @@ def verify_saved_outputs(directory):
 
 
 def _compare_replay(actual, expected):
+    """Require replayed scientific values and event semantics to match references."""
     for field in (
         "config_id", "algorithm", "alpha_label", "correctness_status", "bucket_count",
         "global_threshold_violation_count", "total_messages", "root_synchronization_count",
@@ -3030,6 +3195,7 @@ def _compare_replay(actual, expected):
 
 
 def verify_production_replays(directory=None):
+    """Run isolated subprocess replays and compare them with current references."""
     before = _paired_directory_hashes(directory) if directory is not None else None
     try:
         if directory is not None:
@@ -3071,12 +3237,18 @@ def verify_production_replays(directory=None):
 
 
 class WeightedProductionReplayTests(unittest.TestCase):
+    """Replay all controls and weighted configurations in fresh processes."""
+
     def test_six_fresh_process_replays_match_independent_references_and_current_process(self):
+        """Compare six independent replays with references and current-process results."""
         verify_production_replays()
 
 
 class AnalysisNotebookTests(unittest.TestCase):
+    """Protect the saved-results-only analysis notebook and its evidence boundaries."""
+
     def test_analysis_notebook_is_saved_only_and_revised_presentation_moved(self):
+        """Ensure analysis reads saved results and leaves presentation outside production."""
         path = ROOT / "scripts" / "phase3_analyze.ipynb"
         notebook = json.loads(path.read_text(encoding="utf-8"))
         imports = []
@@ -3110,6 +3282,7 @@ class AnalysisNotebookTests(unittest.TestCase):
         )
 
     def test_analysis_loader_missing_inputs_fail_without_writes_or_replays(self):
+        """Fail closed on missing analysis inputs without producing replacements."""
         with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
             implementation.subprocess, "run", side_effect=AssertionError("Analysis cannot replay")
         ):
@@ -3119,11 +3292,13 @@ class AnalysisNotebookTests(unittest.TestCase):
             self.assertEqual(list(directory.iterdir()), [])
 
     def test_analysis_output_cells_are_not_a_production_receipt_dependency(self):
+        """Keep notebook presentation code out of the production receipt contract."""
         self.assertNotIn(
             "scripts/phase3_analyze.ipynb", implementation.validation_provenance(ROOT)
         )
 
     def test_cutover_provenance_covers_current_references_not_retired_entry_points(self):
+        """Hash current maintained sources and references rather than retired files."""
         provenance = implementation.validation_provenance(ROOT)
         self.assertIn("scripts/phase3_implement.py", provenance)
         self.assertIn("scripts/phase3_test.py", provenance)
@@ -3147,12 +3322,14 @@ class AnalysisNotebookTests(unittest.TestCase):
                 implementation.validation_provenance(root)
 
     def test_matched_baseline_requires_current_phase2_producer(self):
+        """Require current Phase 2 producer evidence for the matched comparator."""
         contract = implementation._validate_contract(ROOT)
         phase2_path = contract["phase2_path"]
         original_hash = implementation._sha256
         self.assertEqual(contract["revised"]["provenance"]["code_sha256"], original_hash(phase2_path))
 
         def changed_phase2_hash(path):
+            """Simulate a changed Phase 2 producer while preserving other hashes."""
             return "0" * 64 if Path(path) == phase2_path else original_hash(path)
 
         with mock.patch.object(implementation, "_sha256", side_effect=changed_phase2_hash):
@@ -3160,6 +3337,7 @@ class AnalysisNotebookTests(unittest.TestCase):
                 implementation._validate_contract(ROOT)
 
     def test_equivalence_cli_requires_isolation_and_rejects_mixed_modes(self):
+        """Require an isolated destination for equivalence-only CLI execution."""
         for options in (
             ["--equivalence"],
             ["--equivalence", "--replay"],
@@ -3172,6 +3350,7 @@ class AnalysisNotebookTests(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
 
     def test_analysis_loader_rejects_failed_or_mixed_run_records_before_presentation(self):
+        """Reject failed or cross-run evidence before notebook presentation begins."""
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             _write_reference_tables(directory)
@@ -3204,7 +3383,10 @@ class AnalysisNotebookTests(unittest.TestCase):
 
 
 class SavedOutputValidationTests(unittest.TestCase):
+    """Validate persisted result schemas, provenance, snapshots, and corruption cases."""
+
     def test_artifact_names_and_csv_serialization_preserve_nulls_integers_and_precision(self):
+        """Keep artifact basenames and CSV value serialization stable."""
         self.assertEqual(len(implementation.BUNDLE_FILES), 7)
         self.assertEqual(len(set(implementation.BUNDLE_FILES)), 7)
         self.assertTrue(all(name.startswith("phase3_") for name in implementation.BUNDLE_FILES))
@@ -3223,6 +3405,7 @@ class SavedOutputValidationTests(unittest.TestCase):
             self.assertEqual(saved[1]["count"], "0")
 
     def test_old_output_bundle_is_rejected_without_writing_or_deleting_it(self):
+        """Reject a superseded bundle while preserving its exact bytes."""
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             (directory / "phase3a_us325_comparison_summary.json").write_text("protected previous bundle")
@@ -3232,6 +3415,7 @@ class SavedOutputValidationTests(unittest.TestCase):
             self.assertEqual(before, _directory_hashes(directory))
 
     def test_failed_attempt_replaces_success_identity_despite_leftover_tables(self):
+        """Do not let leftover successful tables certify a later failed attempt."""
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             (directory / implementation.RESULTS_PATH).write_text("leftover successful table")
@@ -3253,6 +3437,7 @@ class SavedOutputValidationTests(unittest.TestCase):
                 implementation.load_phase3_run(ROOT, directory)
 
     def test_schema_inventory_and_receipt_mutations_are_rejected(self):
+        """Reject missing/extra schema entries and altered embedded receipt metadata."""
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             _write_reference_tables(directory)
@@ -3305,6 +3490,7 @@ class SavedOutputValidationTests(unittest.TestCase):
                     (directory / "legacy.json").unlink()
 
     def test_snapshot_schema_source_values_and_finite_moments_are_verified(self):
+        """Validate snapshot fields against source rows and finite moment values."""
         contract, _, _, averages, _ = _source_observations()
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -3331,6 +3517,7 @@ class SavedOutputValidationTests(unittest.TestCase):
                         _verify_snapshots(directory, indexed, contract, averages)
 
     def test_saved_table_mutations_fail_independently_of_passing_flags(self):
+        """Detect changed scientific rows even when saved status flags claim success."""
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             _write_reference_tables(directory)
@@ -3379,6 +3566,7 @@ class SavedOutputValidationTests(unittest.TestCase):
                 _verify_result_tables(directory, 19984, 1999)
 
     def test_missing_output_and_stale_saved_provenance_fail_without_recertifying(self):
+        """Fail on absent results or stale hashes without refreshing their receipt."""
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             with self.assertRaises(FileNotFoundError):
@@ -3389,6 +3577,7 @@ class SavedOutputValidationTests(unittest.TestCase):
             self.assertEqual(list(directory.iterdir()), [])
 
     def test_full_precision_threshold_is_consumed_without_rounding(self):
+        """Require saved validation to use the exact source-derived P90 value."""
         config = load_phase3a_config(ROOT)
         preparation = prepare_monitoring(ROOT)
         threshold = preparation["p90_value"]
@@ -3398,6 +3587,7 @@ class SavedOutputValidationTests(unittest.TestCase):
         self.assertEqual(monitor.threshold, threshold)
 
     def test_inherited_smic_coverage_and_legacy_mapping_are_preserved(self):
+        """Retain inherited SMIC cases and legacy coverage mapping identities."""
         names = set(unittest.defaultTestLoader.getTestCaseNames(FMICProtocolTests))
         inherited = set(unittest.defaultTestLoader.getTestCaseNames(SMICProtocolTests))
         self.assertTrue(names <= inherited)
@@ -3406,6 +3596,7 @@ class SavedOutputValidationTests(unittest.TestCase):
                 self.assertTrue(issubclass(globals()[name], unittest.TestCase))
 
     def test_verification_reports_cannot_overwrite_sources_results_or_checkpoints(self):
+        """Keep verification reports outside sources, scientific outputs, and seals."""
         provenance = implementation.validation_provenance(ROOT)
         for path in (
             ROOT / "scripts" / "README_scripts.md",
@@ -3422,6 +3613,7 @@ class SavedOutputValidationTests(unittest.TestCase):
 
 
 def _build_suite(checks, output_dir=None, cross_phase=False):
+    """Build the selected unittest suite while preserving canonical case order."""
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     if "behavior" in checks:
@@ -3434,6 +3626,7 @@ def _build_suite(checks, output_dir=None, cross_phase=False):
     if "saved" in checks:
         _require(output_dir is not None, "--checks saved requires --output-dir")
         def saved_output_check():
+            """Adapt saved-output validation into a discovered unittest case."""
             return verify_saved_outputs(output_dir)
         suite.addTest(unittest.FunctionTestCase(
             saved_output_check, description="Saved schemas, source oracle, accounting, snapshots and current provenance",
@@ -3441,6 +3634,7 @@ def _build_suite(checks, output_dir=None, cross_phase=False):
     if "replay" in checks:
         suite.addTests(loader.loadTestsFromTestCase(ProductionReproducibilityTests))
         def weighted_replay_check():
+            """Adapt the six-configuration fresh-process replay to unittest."""
             return verify_production_replays(output_dir)
         suite.addTest(unittest.FunctionTestCase(
             weighted_replay_check, description="Six read-only weighted/control fresh-process replays",
@@ -3451,6 +3645,7 @@ def _build_suite(checks, output_dir=None, cross_phase=False):
 
 
 def _test_ids(suite):
+    """Return discovered IDs, including inherited tests, in suite order."""
     for item in suite:
         if isinstance(item, unittest.TestSuite):
             yield from _test_ids(item)
@@ -3459,6 +3654,7 @@ def _test_ids(suite):
 
 
 def _validate_report_path(path, output_dir, provenance):
+    """Reject report files that overlap sources, results, or protected evidence."""
     target = path.resolve()
     _require(target not in {(ROOT / relative).resolve() for relative in provenance}, "Verification report cannot overwrite a validated input or source file")
     _require(
@@ -3492,6 +3688,12 @@ def _validate_report_path(path, output_dir, provenance):
 
 
 def run_verification(checks, output_dir=None, report_path=None, cross_phase=False):
+    """Run requested checks and return a provenance- and integrity-aware report.
+
+    The report records test IDs, failures/errors/skips, source hashes, and
+    before/after protected-file checks. Writing an optional report does not
+    mutate scientific outputs or refresh their independent validation receipt.
+    """
     checks = [name for name in ("behavior", "saved", "replay") if name in checks]
     _require(bool(checks), "Select at least one check")
     before = implementation.validation_provenance(ROOT)
@@ -3532,6 +3734,7 @@ def record_validation(path):
 
 
 def main(argv=None):
+    """Dispatch behavior, saved, replay, and external-receipt CLI modes."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checks", nargs="+", choices=("behavior", "saved", "replay"), default=None)
     parser.add_argument("--output-dir", type=Path, help="Existing saved results to verify read-only.")
