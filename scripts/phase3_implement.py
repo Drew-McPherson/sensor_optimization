@@ -36,6 +36,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 import math
 from numbers import Real
@@ -2809,12 +2810,159 @@ RUN_PATH = "phase3_run.json"
 RESULTS_PATH = "phase3_results.csv"
 CLUSTER_SIZES_PATH = "phase3_cluster_sizes.csv"
 SNAPSHOTS_PATH = "phase3_snapshots.csv"
+SELECTED_TRACE_PATH = "phase3_selected_trace.csv"
 SUMMARY_PATH = "phase3_summary.json"
 EQUIVALENCE_EVENTS_PATH = "phase3_equivalence_events.csv"
 VALIDATION_PATH = "phase3_validation.json"
-OUTPUT_FILES = (RESULTS_PATH, CLUSTER_SIZES_PATH, SNAPSHOTS_PATH, SUMMARY_PATH)
+SELECTED_TRACE_SCHEMA_VERSION = 1
+SELECTED_TRACE_COLUMNS = (
+    "run_id",
+    "config_id",
+    "algorithm",
+    "alpha_label",
+    "configuration_kind",
+    "selection_reasons",
+    "bucket_epoch",
+    "bucket_time_utc",
+    "initialization",
+    "observed_sensor_values",
+    "observed_global_average",
+    "p90_threshold",
+    "global_violated",
+    "entry_references",
+    "entry_known_state",
+    "entry_node_allowances",
+    "entry_coordinator_allowances",
+    "entry_partition",
+    "entry_coordinator_assignments",
+    "sensor_triggering_ids",
+    "cluster_checks",
+    "coordinator_check_count",
+    "coordinator_escalation_count",
+    "synchronized",
+    "synchronization_causes",
+    "exit_references",
+    "exit_known_state",
+    "exit_node_allowances",
+    "exit_coordinator_allowances",
+    "exit_partition",
+    "exit_coordinator_assignments",
+    *MESSAGE_CATEGORIES,
+    "total_messages",
+    "false_safe",
+    "false_violated",
+)
+OUTPUT_FILES = (
+    RESULTS_PATH, CLUSTER_SIZES_PATH, SNAPSHOTS_PATH, SELECTED_TRACE_PATH, SUMMARY_PATH,
+)
 OPERATIONAL_RUN_FILES = (RUN_PATH, EQUIVALENCE_EVENTS_PATH, VALIDATION_PATH)
 BUNDLE_FILES = OUTPUT_FILES + OPERATIONAL_RUN_FILES
+
+
+def _trace_json(value: Any) -> str:
+    """Serialize trace collections deterministically, retaining explicit nulls."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _selected_trace_scope(
+    controls: list[dict[str, Any]],
+    alpha_rows: list[dict[str, Any]],
+    minima: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Select controls, prespecified alpha, and every in-sample tied minimum."""
+    selected: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in controls:
+        if row["config_id"] not in ("C1", "C2"):
+            continue
+        selected[(row["config_id"], row["alpha_label"])] = {
+            "config_id": row["config_id"],
+            "algorithm": row["algorithm"],
+            "alpha_label": row["alpha_label"],
+            "configuration_kind": "control",
+            "selection_reasons": ["fixed_singleton_control"],
+        }
+    for row in alpha_rows:
+        key = (row["algorithm"], row["alpha_label"])
+        if row["alpha_label"] == "0.10":
+            selected[key] = {
+                "config_id": row["algorithm"],
+                "algorithm": row["algorithm"],
+                "alpha_label": row["alpha_label"],
+                "configuration_kind": "clustered",
+                "selection_reasons": ["prespecified_alpha_0.10"],
+            }
+    for method in ("FMIC", "SMIC"):
+        for alpha_label in minima[method]["alpha_labels"]:
+            key = (method, alpha_label)
+            if key not in selected:
+                row = next(
+                    item for item in alpha_rows
+                    if item["algorithm"] == method and item["alpha_label"] == alpha_label
+                )
+                selected[key] = {
+                    "config_id": method,
+                    "algorithm": method,
+                    "alpha_label": alpha_label,
+                    "configuration_kind": "clustered",
+                    "selection_reasons": [],
+                }
+            reasons = selected[key]["selection_reasons"]
+            if "minimum_message_count" not in reasons:
+                reasons.append("minimum_message_count")
+    order = {"C1": 0, "C2": 1, "FMIC": 2, "SMIC": 3}
+    return sorted(
+        selected.values(),
+        key=lambda item: (
+            order[item["config_id"]],
+            -1 if item["alpha_label"] == "not_applicable" else float(item["alpha_label"]),
+        ),
+    )
+
+
+def _trace_scope_from_file(path: Path) -> list[dict[str, Any]]:
+    """Read the unique, ordered configuration and reason metadata from a trace."""
+    scope: list[dict[str, Any]] = []
+    seen: dict[tuple[str, str], tuple[str, str, str]] = {}
+    trace_run_id: str | None = None
+    with path.open(encoding="utf-8", newline="") as stream:
+        reader = csv.DictReader(stream)
+        if tuple(reader.fieldnames or ()) != SELECTED_TRACE_COLUMNS:
+            raise ValueError("Selected Phase 3 trace columns differ from the ordered schema.")
+        for row in reader:
+            if not row["run_id"] or (
+                trace_run_id is not None and row["run_id"] != trace_run_id
+            ):
+                raise ValueError("Selected Phase 3 trace mixes or omits production run identities.")
+            trace_run_id = row["run_id"]
+            key = (row["config_id"], row["alpha_label"])
+            identity = (
+                row["algorithm"],
+                row["configuration_kind"],
+                row["selection_reasons"],
+            )
+            previous = seen.get(key)
+            if previous is not None and previous != identity:
+                raise ValueError("Selected Phase 3 trace changes configuration metadata between buckets.")
+            if previous is None:
+                try:
+                    reasons = json.loads(row["selection_reasons"])
+                except json.JSONDecodeError as error:
+                    raise ValueError("Selected Phase 3 trace has invalid selection-reason JSON.") from error
+                if not isinstance(reasons, list) or not reasons or any(
+                    not isinstance(reason, str) for reason in reasons
+                ):
+                    raise ValueError("Selected Phase 3 trace requires nonempty selection reasons.")
+                seen[key] = identity
+                scope.append({
+                    "config_id": row["config_id"],
+                    "algorithm": row["algorithm"],
+                    "alpha_label": row["alpha_label"],
+                    "configuration_kind": row["configuration_kind"],
+                    "selection_reasons": reasons,
+                })
+    if not scope:
+        raise ValueError("Selected Phase 3 trace cannot be empty.")
+    return scope
 
 
 def _json_fingerprint(value: Any) -> str:
@@ -2833,6 +2981,27 @@ def _write_csv_records(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def _write_selected_trace_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Write the selected trace with its versioned, explicitly ordered schema."""
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(
+            stream, fieldnames=SELECTED_TRACE_COLUMNS, lineterminator="\n",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _selected_trace_content_sha256(rows: list[dict[str, Any]]) -> str:
+    """Hash normalized selected rows for comparison across independent run IDs."""
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        stream, fieldnames=SELECTED_TRACE_COLUMNS, lineterminator="\n",
+    )
+    writer.writeheader()
+    writer.writerows({**row, "run_id": "__replay__"} for row in rows)
+    return hashlib.sha256(stream.getvalue().encode("utf-8")).hexdigest()
+
+
 def _artifact_inventory(directory: Path, operational_dir: Path) -> dict[str, Any]:
     """Inventory bundle files and hashes across output and operational folders."""
     inventory = {}
@@ -2840,6 +3009,10 @@ def _artifact_inventory(directory: Path, operational_dir: Path) -> dict[str, Any
         RESULTS_PATH: ["config_id", "alpha_label"],
         CLUSTER_SIZES_PATH: ["config_id", "alpha_label", "cluster_size"],
         SNAPSHOTS_PATH: ["config_id", "alpha_label", "synchronization_id"],
+        SELECTED_TRACE_PATH: [
+            "config_id", "algorithm", "alpha_label",
+            "configuration_kind", "bucket_epoch",
+        ],
         EQUIVALENCE_EVENTS_PATH: ["bucket_epoch"],
     }
     for location, name in (
@@ -2853,6 +3026,12 @@ def _artifact_inventory(directory: Path, operational_dir: Path) -> dict[str, Any
             with path.open(encoding="utf-8", newline="") as stream:
                 reader = csv.reader(stream)
                 metadata.update(columns=next(reader), row_count=sum(1 for _ in reader), key=keys[name])
+            if name == SELECTED_TRACE_PATH:
+                metadata.update(
+                    size_bytes=path.stat().st_size,
+                    schema_version=SELECTED_TRACE_SCHEMA_VERSION,
+                    selection_scope=_trace_scope_from_file(path),
+                )
         inventory[f"{location}/{name}"] = metadata
     return inventory
 
@@ -2871,6 +3050,12 @@ def _bundle_semantics() -> dict[str, Any]:
         "initialization": "Included in synchronization/event counts; not a moment observation.",
         "precision": "Round-trip numerical precision; original observation order retained.",
         "snapshots": "All C1/C2 syncs; FMIC/SMIC alpha 0.10 and every tied tested-grid minimum only. No C0 snapshots.",
+        "selected_minute_trace": (
+            "Schema v1; C1/C2, clustered alpha 0.10, and every tied tested-grid minimum; "
+            "one row per selected configuration and bucket. Collections are compact sorted-key "
+            "JSON; JSON null means unavailable and empty arrays/maps remain []/{}. Full underlying "
+            "numeric values are serialized without deliberate rounding."
+        ),
         "equivalence_events": "All C0 initialization/root-sync events, not all per-bucket decisions.",
         "comparators": {
             "primary": "Revised two-sided Phase 2/C0; identified by baseline source hash.",
@@ -2911,12 +3096,22 @@ def load_phase3_run(root: Path, directory: Path) -> dict[str, Any]:
         raise ValueError("Saved Phase 3 bundle is incomplete, incompatible or failed.")
     if run.get("artifacts") != _artifact_inventory(directory, operational_dir):
         raise ValueError("Saved Phase 3 artifact hashes, schemas or row counts differ from the run inventory.")
+    trace_inventory = run["artifacts"][f"outputs/{SELECTED_TRACE_PATH}"]
+    if trace_inventory.get("key") != [
+        "config_id", "algorithm", "alpha_label",
+        "configuration_kind", "bucket_epoch",
+    ] or trace_inventory.get("schema_version") != SELECTED_TRACE_SCHEMA_VERSION:
+        raise ValueError("Saved Phase 3 selected trace key or schema version is incompatible.")
     for section in ("completion", "failures"):
         record = run.get(section, {})
         if record.get("status") != "passed" or record.get("run_id") != run["run_id"]:
             raise ValueError("Saved Phase 3 reports do not identify the same successful current run.")
     if run["failures"].get("failure_count") != 0 or run["failures"].get("failures") != []:
         raise ValueError("Saved Phase 3 bundle contains failures.")
+    trace_path = directory / SELECTED_TRACE_PATH
+    with trace_path.open(encoding="utf-8", newline="") as stream:
+        if any(row["run_id"] != run["run_id"] for row in csv.DictReader(stream)):
+            raise ValueError("Saved Phase 3 selected trace belongs to another production run.")
     summary = _read_json(directory / SUMMARY_PATH)
     summary_reference = run.get("summary")
     if (
@@ -2976,6 +3171,15 @@ def _read_result_frames(directory: Path) -> dict[str, pd.DataFrame]:
         "control_cluster_sizes": sizes.loc[control_sizes].drop(columns="alpha_label").reset_index(drop=True),
         "cluster_sizes": sizes.loc[~control_sizes].reset_index(drop=True),
         "snapshots": pd.read_csv(directory / SNAPSHOTS_PATH, dtype={"alpha_label": str}, float_precision="round_trip"),
+        "selected_trace": pd.read_csv(
+            directory / SELECTED_TRACE_PATH,
+            dtype={
+                "run_id": str, "config_id": str, "algorithm": str,
+                "alpha_label": str, "configuration_kind": str,
+            },
+            float_precision="round_trip",
+            keep_default_na=False,
+        ),
     }
 
 
@@ -3386,6 +3590,309 @@ def _composition(category_totals: dict[str, int]) -> dict[str, Any]:
     }
 
 
+def _trace_partition(partition: Sequence[Sequence[str]] | None) -> list[list[str]] | None:
+    """Convert partition tuples to the stable list representation used in JSON."""
+    if partition is None:
+        return None
+    return [list(cluster) for cluster in partition]
+
+
+def _trace_coordinator_assignments(
+    partition: Sequence[Sequence[str]] | None,
+) -> dict[str, str] | None:
+    """Return each cluster's stable coordinator identity, or null before initialization."""
+    if partition is None:
+        return None
+    return {str(index): max(cluster) for index, cluster in enumerate(partition)}
+
+
+def _selected_trace_record(
+    identity: dict[str, Any],
+    values: dict[str, float],
+    threshold: float,
+    decision: dict[str, Any],
+    checks: list[dict[str, Any]],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Build one full-precision trace row from the monitor's decision evidence."""
+    initialization = decision["entry_known_state"] is None
+    entry_partition = decision["entry_partition"] or None
+    exit_partition = decision["post_partition"]
+    cluster_checks = []
+    for check in checks:
+        cluster_checks.append({
+            "cluster_members": list(check["members"]),
+            "coordinator": check["coordinator"],
+            "sensor_triggering_ids": sorted(check["triggers"]),
+            "sensor_deviations": check["deviations"],
+            "node_allowances": check["node_allowances"],
+            "requested_peer_sensor_ids": check["requested_peer_sensor_ids"],
+            "responding_peer_sensor_ids": check["responding_peer_sensor_ids"],
+            "coordinator_allowance": check["coordinator_allowance"],
+            "signed_mean_deviation": check["signed_mean_deviation"],
+            "absolute_mean_deviation": check["absolute_mean_deviation"],
+            "escalated": bool(check["escalates"]),
+            "outcome": "escalated" if check["escalates"] else "locally_resolved",
+        })
+    synchronization_causes = (
+        ["initialization"] if initialization
+        else ["coordinator_violation"] if result["synchronized"]
+        else []
+    )
+    trace = {
+        **identity,
+        "selection_reasons": identity.get("selection_reasons", "[]"),
+        "bucket_epoch": int(decision["bucket_epoch"]),
+        "bucket_time_utc": decision["bucket_time_utc"],
+        "initialization": initialization,
+        "observed_sensor_values": _trace_json(values),
+        "observed_global_average": decision["observed_global_average"],
+        "p90_threshold": threshold,
+        "global_violated": bool(decision["global_violated"]),
+        "entry_references": (
+            _trace_json(decision["entry_references"]) if not initialization else "null"
+        ),
+        "entry_known_state": _trace_json(decision["entry_known_state"]),
+        "entry_node_allowances": (
+            _trace_json(decision["entry_node_allowances"]) if not initialization else "null"
+        ),
+        "entry_coordinator_allowances": (
+            _trace_json(decision["entry_coordinator_allowances"]) if not initialization else "null"
+        ),
+        "entry_partition": (
+            _trace_json(_trace_partition(entry_partition)) if not initialization else "null"
+        ),
+        "entry_coordinator_assignments": (
+            _trace_json(_trace_coordinator_assignments(entry_partition))
+            if not initialization else "null"
+        ),
+        "sensor_triggering_ids": _trace_json(sorted(decision["triggering_sensor_ids"])),
+        "cluster_checks": _trace_json(cluster_checks),
+        "coordinator_check_count": int(result["coordinator_checks"]),
+        "coordinator_escalation_count": int(result["coordinator_escalations"]),
+        "synchronized": bool(result["synchronized"]),
+        "synchronization_causes": _trace_json(synchronization_causes),
+        "exit_references": _trace_json(decision["post_references"]),
+        "exit_known_state": decision["root_known_state"],
+        "exit_node_allowances": _trace_json(decision["post_node_allowances"]),
+        "exit_coordinator_allowances": _trace_json(
+            decision["post_coordinator_allowances"]
+        ),
+        "exit_partition": _trace_json(_trace_partition(exit_partition)),
+        "exit_coordinator_assignments": _trace_json(
+            _trace_coordinator_assignments(exit_partition)
+        ),
+        **{name: int(result["messages"][name]) for name in MESSAGE_CATEGORIES},
+        "total_messages": int(result["total_messages"]),
+        "false_safe": bool(result["false_safe"]),
+        "false_violated": bool(
+            not decision["global_violated"] and result["known_violated"]
+        ),
+    }
+    return trace
+
+
+def _validate_selected_trace_rows(
+    rows: list[dict[str, Any]],
+    scope: list[dict[str, Any]],
+    result_rows: list[dict[str, Any]],
+    expected_epochs: Sequence[int],
+    run_id: str,
+    sensor_count: int,
+) -> None:
+    """Reconcile selected minute rows, protocol events, and result summaries."""
+    expected_epoch_values = [int(epoch) for epoch in expected_epochs]
+    expected_keys = [
+        (item["config_id"], item["alpha_label"]) for item in scope
+    ]
+    if len(set(expected_keys)) != len(expected_keys):
+        raise ValueError("Selected Phase 3 trace scope contains duplicate configurations.")
+    if len(rows) != len(scope) * len(expected_epoch_values):
+        raise ValueError("Selected Phase 3 trace row count differs from configuration-minute coverage.")
+    if not expected_epoch_values or len(set(expected_epoch_values)) != len(expected_epoch_values):
+        raise ValueError("Selected Phase 3 trace requires unique input bucket epochs.")
+    by_result = {
+        (row["config_id"], row["alpha_label"]): row for row in result_rows
+    }
+    expected_order = [
+        (key, epoch) for key in expected_keys for epoch in expected_epoch_values
+    ]
+    observed_order = [
+        ((row["config_id"], row["alpha_label"]), int(row["bucket_epoch"]))
+        for row in rows
+    ]
+    if observed_order != expected_order:
+        raise ValueError("Selected Phase 3 trace configuration/bucket order or unique key is invalid.")
+
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {
+        key: [] for key in expected_keys
+    }
+    scope_by_key = {
+        (item["config_id"], item["alpha_label"]): item for item in scope
+    }
+    for row in rows:
+        key = (row["config_id"], row["alpha_label"])
+        expected = scope_by_key[key]
+        if (
+            row["run_id"] != run_id
+            or row["algorithm"] != expected["algorithm"]
+            or row["configuration_kind"] != expected["configuration_kind"]
+            or row["selection_reasons"] != _trace_json(expected["selection_reasons"])
+            or key not in by_result
+        ):
+            raise ValueError(f"Selected Phase 3 trace has mixed or incorrect configuration provenance: {key}.")
+        grouped[key].append(row)
+
+        checks = json.loads(row["cluster_checks"])
+        triggers = json.loads(row["sensor_triggering_ids"])
+        causes = json.loads(row["synchronization_causes"])
+        if (
+            not isinstance(checks, list) or not isinstance(triggers, list)
+            or not isinstance(causes, list)
+            or int(row["coordinator_check_count"]) != len(checks)
+            or int(row["coordinator_escalation_count"])
+            != sum(bool(check["escalated"]) for check in checks)
+            or len(triggers) != len(set(triggers))
+            or row["total_messages"] != sum(int(row[name]) for name in MESSAGE_CATEGORIES)
+        ):
+            raise ValueError(f"Selected Phase 3 trace minute does not reconcile: {key}/{row['bucket_epoch']}.")
+        check_triggers = sorted({
+            sensor for check in checks for sensor in check["sensor_triggering_ids"]
+        })
+        if triggers != check_triggers:
+            raise ValueError(f"Selected Phase 3 trace trigger identities differ from cluster checks: {key}.")
+        peer_categories = {
+            "node_trigger_messages": sum(
+                len(set(check["sensor_triggering_ids"]) - {check["coordinator"]})
+                for check in checks
+            ),
+            "cluster_check_requests": sum(
+                len(check["requested_peer_sensor_ids"]) for check in checks
+            ),
+            "cluster_check_responses": sum(
+                len(check["responding_peer_sensor_ids"]) for check in checks
+            ),
+            "coordinator_root_escalations": sum(
+                bool(check["escalated"]) for check in checks
+            ),
+        }
+        synchronized = bool(row["synchronized"])
+        if (
+            any(int(row[name]) != count for name, count in peer_categories.items())
+            or int(row["root_sync_requests"]) != (sensor_count if synchronized else 0)
+            or int(row["root_sync_responses"]) != (sensor_count if synchronized else 0)
+            or int(row["root_state_updates"]) != (sensor_count if synchronized else 0)
+            or bool(row["initialization"]) != (causes == ["initialization"])
+            or synchronized != bool(causes)
+            or row["false_safe"] != (
+                bool(row["global_violated"]) and row["exit_known_state"] != "VIOLATED"
+            )
+            or row["false_violated"] != (
+                not bool(row["global_violated"]) and row["exit_known_state"] == "VIOLATED"
+            )
+        ):
+            raise ValueError(f"Selected Phase 3 trace communication or correctness fields differ: {key}.")
+
+    count_fields = (
+        "total_messages", "root_synchronization_count", "coordinator_check_count",
+        "checks_escalated", "node_trigger_count", "false_safe_count",
+        "false_violated_count", "global_threshold_violation_count", *MESSAGE_CATEGORIES,
+    )
+    for key, items in grouped.items():
+        result = by_result[key]
+        totals = dict.fromkeys(MESSAGE_CATEGORIES, 0)
+        trace_counts = {
+            "total_messages": 0,
+            "root_synchronization_count": 0,
+            "coordinator_check_count": 0,
+            "checks_escalated": 0,
+            "node_trigger_count": 0,
+            "false_safe_count": 0,
+            "false_violated_count": 0,
+            "global_threshold_violation_count": 0,
+        }
+        for item in items:
+            for name in MESSAGE_CATEGORIES:
+                totals[name] += int(item[name])
+            trace_counts["total_messages"] += int(item["total_messages"])
+            trace_counts["root_synchronization_count"] += int(bool(item["synchronized"]))
+            trace_counts["coordinator_check_count"] += int(item["coordinator_check_count"])
+            trace_counts["checks_escalated"] += int(item["coordinator_escalation_count"])
+            trace_counts["node_trigger_count"] += len(json.loads(item["sensor_triggering_ids"]))
+            trace_counts["false_safe_count"] += int(bool(item["false_safe"]))
+            trace_counts["false_violated_count"] += int(bool(item["false_violated"]))
+            trace_counts["global_threshold_violation_count"] += int(bool(item["global_violated"]))
+        trace_counts.update(totals)
+        if any(int(result[field]) != trace_counts[field] for field in count_fields):
+            raise ValueError(f"Selected Phase 3 trace does not reconcile with result row {key}.")
+
+
+def _validate_selected_trace_source(
+    rows: list[dict[str, Any]],
+    observations: pd.DataFrame,
+    columns: list[str],
+    threshold: float,
+) -> None:
+    """Verify minute observations, oracle values, timestamps, and carried state."""
+    source = {
+        int(row[0]): row[1:]
+        for row in observations[
+            ["bucket_epoch", "bucket_time_utc", *columns]
+        ].itertuples(index=False, name=None)
+    }
+    previous: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (row["config_id"], row["alpha_label"])
+        epoch = int(row["bucket_epoch"])
+        if epoch not in source:
+            raise ValueError(f"Selected Phase 3 trace contains an unknown bucket: {epoch}.")
+        source_row = source[epoch]
+        sensor_values = json.loads(row["observed_sensor_values"])
+        expected_values = {
+            column.removesuffix("_temperature"): float(value)
+            for column, value in zip(columns, source_row[1:])
+        }
+        if (
+            sensor_values != expected_values
+            or row["bucket_time_utc"] != source_row[0]
+            or float(row["p90_threshold"]) != threshold
+        ):
+            raise ValueError(f"Selected Phase 3 trace observations differ from source at {epoch}.")
+        average = math.fsum(sensor_values.values()) / len(columns)
+        if (
+            float(row["observed_global_average"]) != average
+            or bool(row["global_violated"]) != (average >= threshold)
+        ):
+            raise ValueError(f"Selected Phase 3 trace oracle differs from source at {epoch}.")
+        prior = previous.get(key)
+        if prior is None:
+            if (
+                not bool(row["initialization"])
+                or json.loads(row["entry_references"]) is not None
+                or json.loads(row["entry_node_allowances"]) is not None
+                or json.loads(row["entry_coordinator_allowances"]) is not None
+                or json.loads(row["entry_partition"]) is not None
+                or json.loads(row["entry_coordinator_assignments"]) is not None
+                or json.loads(row["entry_known_state"]) is not None
+            ):
+                raise ValueError(f"Selected Phase 3 trace initialization state is not explicit: {key}.")
+        else:
+            if (
+                bool(row["initialization"])
+                or epoch - int(prior["bucket_epoch"]) != 60
+                or json.loads(row["entry_references"]) != json.loads(prior["exit_references"])
+                or json.loads(row["entry_node_allowances"]) != json.loads(prior["exit_node_allowances"])
+                or json.loads(row["entry_coordinator_allowances"])
+                != json.loads(prior["exit_coordinator_allowances"])
+                or json.loads(row["entry_partition"]) != json.loads(prior["exit_partition"])
+                or json.loads(row["entry_coordinator_assignments"])
+                != json.loads(prior["exit_coordinator_assignments"])
+                or json.loads(row["entry_known_state"]) != prior["exit_known_state"]
+            ):
+                raise ValueError(f"Selected Phase 3 trace entry state does not carry forward: {key}/{epoch}.")
+        previous[key] = row
+
+
 def _run_monitor(
     monitor_class: Any,
     frame: pd.DataFrame,
@@ -3397,8 +3904,12 @@ def _run_monitor(
     fixed_singletons: bool,
     clustering: Any = None,
     allocation_strategy: Any = None,
+    trace_rows: list[dict[str, Any]] | None = None,
+    trace_identity: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     """Run one isolated configuration and derive event/size summaries."""
+    if (trace_rows is None) != (trace_identity is None):
+        raise ValueError("Selected trace rows and configuration identity must be supplied together.")
     sensor_ids = tuple(column.removesuffix("_temperature") for column in sensor_columns)
     kwargs = {}
     if fixed_singletons:
@@ -3413,6 +3924,7 @@ def _run_monitor(
         alpha,
         weight_method=weight_method,
         raise_on_false_safe=False,
+        capture_decisions=trace_rows is not None,
         **kwargs,
     )
     size_counts = {
@@ -3456,15 +3968,33 @@ def _run_monitor(
                 }
                 if not triggers:
                     continue
-                escalates = (
-                    abs(math.fsum(deviations.values()) / len(cluster))
-                    >= monitor.allocation["coordinator_allowances"][coordinator]
-                )
+                signed_mean_deviation = math.fsum(deviations.values()) / len(cluster)
+                absolute_mean_deviation = abs(signed_mean_deviation)
+                escalates = absolute_mean_deviation >= monitor.allocation[
+                    "coordinator_allowances"
+                ][coordinator]
                 checks.append({
                     "members": tuple(sorted(cluster)),
                     "size": len(cluster),
+                    "coordinator": coordinator,
                     "triggers": triggers,
                     "escalates": escalates,
+                    "deviations": deviations,
+                    "node_allowances": {
+                        sensor: monitor.allocation["node_allowances"][sensor]
+                        for sensor in sorted(cluster)
+                    },
+                    "requested_peer_sensor_ids": sorted(
+                        set(cluster) - triggers - {coordinator}
+                    ),
+                    "responding_peer_sensor_ids": sorted(
+                        set(cluster) - triggers - {coordinator}
+                    ),
+                    "coordinator_allowance": monitor.allocation[
+                        "coordinator_allowances"
+                    ][coordinator],
+                    "signed_mean_deviation": signed_mean_deviation,
+                    "absolute_mean_deviation": absolute_mean_deviation,
                     "node_trigger_messages": len(triggers - {coordinator}),
                     "peer_messages": len(set(cluster) - triggers - {coordinator}),
                 })
@@ -3488,6 +4018,15 @@ def _run_monitor(
         }
         if any(result["messages"][key] != value for key, value in expected_peer_categories.items()):
             raise RuntimeError("Per-cluster communication does not reconcile to monitor messages.")
+        if trace_rows is not None and trace_identity is not None:
+            trace_rows.append(_selected_trace_record(
+                trace_identity,
+                values,
+                threshold,
+                monitor.decision_trace[-1],
+                checks,
+                result,
+            ))
 
         checked_memberships = {item["members"] for item in checks}
         is_consecutive = (
@@ -3869,9 +4408,13 @@ def _run_control(
     columns: list[str],
     threshold: float,
     method: str,
+    *,
+    trace_rows: list[dict[str, Any]] | None = None,
+    run_id: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     """Run C1 or C2 with singleton clusters and validate its control invariants."""
     monitor_class = engine.FMICMonitor
+    config_id = "C1" if method == "FMIC" else "C2"
     summary, by_size, events = _run_monitor(
         monitor_class,
         frame,
@@ -3880,6 +4423,18 @@ def _run_control(
         method,
         alpha=0.1,
         fixed_singletons=True,
+        trace_rows=trace_rows,
+        trace_identity=(
+            {
+                "run_id": run_id,
+                "config_id": config_id,
+                "algorithm": method,
+                "alpha_label": "not_applicable",
+                "configuration_kind": "control",
+                "selection_reasons": "[]",
+            }
+            if trace_rows is not None else None
+        ),
     )
     sensor_ids = tuple(column.removesuffix("_temperature") for column in columns)
     for event in events:
@@ -3907,7 +4462,7 @@ def _run_control(
     summary["singleton_partition_event_share_percent"] = 100.0
     _validate_control(summary)
     row = _configuration_row(
-        "C1" if method == "FMIC" else "C2",
+        config_id,
         method,
         "not_applicable",
         summary,
@@ -3927,6 +4482,9 @@ def _run_alpha(
     threshold: float,
     method: str,
     alpha_label: str,
+    *,
+    trace_rows: list[dict[str, Any]] | None = None,
+    run_id: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     """Run one FMIC/SMIC alpha and return its row, cluster counts, and snapshots."""
     summary, by_size, events = _run_monitor(
@@ -3937,6 +4495,18 @@ def _run_alpha(
         method,
         alpha=float(alpha_label),
         fixed_singletons=False,
+        trace_rows=trace_rows,
+        trace_identity=(
+            {
+                "run_id": run_id,
+                "config_id": method,
+                "algorithm": method,
+                "alpha_label": alpha_label,
+                "configuration_kind": "clustered",
+                "selection_reasons": "[]",
+            }
+            if trace_rows is not None else None
+        ),
     )
     sensor_ids = tuple(column.removesuffix("_temperature") for column in columns)
     cluster_counts = []
@@ -4207,6 +4777,7 @@ def load_phase3_analysis_results(
             "selected_partition", "global_average", "p90_threshold", "root_allowance",
             "moment_observation_count",
         },
+        "selected_trace": set(SELECTED_TRACE_COLUMNS),
     }
     for key, required in schemas.items():
         frame = frames[key]
@@ -4223,6 +4794,17 @@ def load_phase3_analysis_results(
     ):
         raise ValueError("Saved Phase 3 singleton controls are incomplete or alpha-dependent.")
     _validate_alpha_grid(alphas)
+    selected_trace_scope = _selected_trace_scope(
+        controls, alphas, report["alpha_minima"],
+    )
+    trace_inventory = run["artifacts"][f"outputs/{SELECTED_TRACE_PATH}"]
+    if (
+        trace_inventory.get("selection_scope") != selected_trace_scope
+        or trace_inventory.get("row_count")
+        != len(selected_trace_scope) * int(experiment["bucket_count"])
+        or tuple(frames["selected_trace"].columns) != SELECTED_TRACE_COLUMNS
+    ):
+        raise ValueError("Saved Phase 3 selected trace metadata or ordered schema is incompatible.")
     for row in controls + alphas:
         method = {"C0": "equal_allowance", "C1": "FMIC", "C2": "SMIC"}.get(
             row["config_id"], row["config_id"]
@@ -4336,6 +4918,18 @@ def load_phase3_analysis_results(
     ).any():
         raise ValueError("Saved Phase 3 snapshot configurations are incomplete or duplicated.")
     observations, columns = _read_locked_observations(contract)
+    selected_trace_rows = frames["selected_trace"].to_dict(orient="records")
+    _validate_selected_trace_rows(
+        selected_trace_rows,
+        selected_trace_scope,
+        controls + alphas,
+        observations["bucket_epoch"].tolist(),
+        run["run_id"],
+        len(columns),
+    )
+    _validate_selected_trace_source(
+        selected_trace_rows, observations, columns, contract["threshold"],
+    )
     source_averages = {
         int(row[0]): math.fsum(map(float, row[1:])) / len(columns)
         for row in observations[["bucket_epoch", *columns]].itertuples(index=False, name=None)
@@ -4524,6 +5118,9 @@ def _run_fresh_process_replay(
     method: str,
     alpha_label: str,
     expected: dict[str, Any],
+    *,
+    selection_reasons: list[str],
+    expected_trace_sha256: str,
 ) -> dict[str, Any]:
     """Execute one replay in a child interpreter and verify its scientific fields."""
     command = [
@@ -4538,13 +5135,15 @@ def _run_fresh_process_replay(
         method,
         "--alpha",
         alpha_label,
+        "--trace-selection-reasons",
+        _trace_json(selection_reasons),
     ]
     completed = subprocess.run(
         command, cwd=root, text=True, capture_output=True, check=False
     )
     if completed.returncode:
         raise RuntimeError(
-            "Fresh-process US-3.25 replay failed:\n"
+            "Fresh-process selected-trace replay failed:\n"
             + completed.stdout
             + completed.stderr
         )
@@ -4573,10 +5172,22 @@ def _run_fresh_process_replay(
             raise ValueError(
                 f"Fresh-process {method} alpha={alpha_label} differs at {key}."
             )
+    if (
+        replay.get("selected_trace_row_count") != expected["bucket_count"]
+        or replay.get("selected_trace_sha256") != expected_trace_sha256
+    ):
+        raise ValueError(
+            f"Fresh-process {method} alpha={alpha_label} selected trace differs."
+        )
     return {"command": command, "status": "passed", **replay}
 
 
-def _replay(root: Path, method: str, alpha_label: str) -> dict[str, Any]:
+def _replay(
+    root: Path,
+    method: str,
+    alpha_label: str,
+    selection_reasons: list[str] | None = None,
+) -> dict[str, Any]:
     """Recompute and compare one saved configuration using isolated outputs."""
     is_control = method in ("C1", "C2")
     if is_control:
@@ -4591,6 +5202,23 @@ def _replay(root: Path, method: str, alpha_label: str) -> dict[str, Any]:
     frame, columns = _read_locked_observations(contract)
     monitor_class, _ = load_phase3_monitor()
     engine = _load_engine()
+    trace_rows: list[dict[str, Any]] | None = (
+        [] if selection_reasons is not None else None
+    )
+    trace_identity = None
+    if selection_reasons is not None:
+        if not selection_reasons or any(
+            not isinstance(reason, str) or not reason for reason in selection_reasons
+        ):
+            raise ValueError("Selected-trace replay requires nonempty string selection reasons.")
+        trace_identity = {
+            "run_id": "__replay__",
+            "config_id": method if is_control else algorithm,
+            "algorithm": algorithm,
+            "alpha_label": alpha_label,
+            "configuration_kind": "control" if is_control else "clustered",
+            "selection_reasons": _trace_json(selection_reasons),
+        }
     summary, _, events = _run_monitor(
         monitor_class,
         frame,
@@ -4599,8 +5227,10 @@ def _replay(root: Path, method: str, alpha_label: str) -> dict[str, Any]:
         algorithm,
         alpha=0.1 if is_control else float(alpha_label),
         fixed_singletons=is_control,
+        trace_rows=trace_rows,
+        trace_identity=trace_identity,
     )
-    return {
+    result = {
         "config_id": method if is_control else algorithm,
         "algorithm": algorithm,
         "alpha_label": alpha_label,
@@ -4617,6 +5247,12 @@ def _replay(root: Path, method: str, alpha_label: str) -> dict[str, Any]:
             events, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")).hexdigest(),
     }
+    if trace_rows is not None:
+        result.update(
+            selected_trace_row_count=len(trace_rows),
+            selected_trace_sha256=_selected_trace_content_sha256(trace_rows),
+        )
+    return result
 
 
 def run_us325(
@@ -4753,6 +5389,7 @@ def _run_us325(
         for size in range(1, len(sensor_ids) + 1)
     ]
     control_snapshots = []
+    selected_trace_rows: list[dict[str, Any]] = []
     for method in ("FMIC", "SMIC"):
         state["configuration"] = {
             "config_id": "C1" if method == "FMIC" else "C2",
@@ -4762,7 +5399,13 @@ def _run_us325(
         state["stage"] = "singleton_control_execution"
         state["metrics"] = None
         row, by_size, snapshots = _run_control(
-            engine, frame, columns, contract["threshold"], method
+            engine,
+            frame,
+            columns,
+            contract["threshold"],
+            method,
+            trace_rows=selected_trace_rows,
+            run_id=run_id,
         )
         state["metrics"] = {
             "evaluated_bucket_count": row["bucket_count"],
@@ -4808,6 +5451,10 @@ def _run_us325(
                 contract["threshold"],
                 method,
                 alpha_label,
+                trace_rows=(
+                    selected_trace_rows if alpha_label == "0.10" else None
+                ),
+                run_id=run_id if alpha_label == "0.10" else None,
             )
             state["metrics"] = {
                 "evaluated_bucket_count": row["bucket_count"],
@@ -4877,25 +5524,80 @@ def _run_us325(
             }
             state["stage"] = "minimum_configuration_replay"
             state["metrics"] = None
-            _, _, events = _run_alpha(
+            trace_key = (method, alpha_label)
+            capture_minimum = not any(
+                (item["config_id"], item["alpha_label"]) == trace_key
+                for item in selected_trace_rows
+            )
+            replay_row, _, events = _run_alpha(
                 engine,
                 frame,
                 columns,
                 contract["threshold"],
                 method,
                 alpha_label,
+                trace_rows=selected_trace_rows if capture_minimum else None,
+                run_id=run_id if capture_minimum else None,
             )
+            expected_row = next(
+                item for item in alpha_rows
+                if item["algorithm"] == method and item["alpha_label"] == alpha_label
+            )
+            if any(
+                replay_row[field] != expected_row[field]
+                for field in (
+                    "bucket_count", "total_messages", "root_synchronization_count",
+                    "coordinator_check_count", "checks_escalated", "node_trigger_count",
+                    "false_safe_count", "false_violated_count", "events_fingerprint",
+                    *MESSAGE_CATEGORIES,
+                )
+            ):
+                raise RuntimeError(
+                    f"Selected minimum replay differs from its completed result row: {trace_key}."
+                )
             event_snapshots.extend(events)
 
     _validate_saved_regression_outputs(_phase3_reference_directory(root), controls, alpha_rows)
-    state["configuration"] = None
-    state["metrics"] = None
-    results_path = artifacts / RESULTS_PATH
+    selected_trace_scope = _selected_trace_scope(controls, alpha_rows, minima)
+    scope_by_key = {
+        (item["config_id"], item["alpha_label"]): item
+        for item in selected_trace_scope
+    }
+    if {
+        (row["config_id"], row["alpha_label"]) for row in selected_trace_rows
+    } != set(scope_by_key):
+        raise RuntimeError("Selected Phase 3 trace capture does not match the selected configuration scope.")
+    for row in selected_trace_rows:
+        key = (row["config_id"], row["alpha_label"])
+        row["selection_reasons"] = _trace_json(
+            scope_by_key[key]["selection_reasons"]
+        )
+    trace_order = {
+        (item["config_id"], item["alpha_label"]): index
+        for index, item in enumerate(selected_trace_scope)
+    }
+    selected_trace_rows.sort(
+        key=lambda row: (
+            trace_order[(row["config_id"], row["alpha_label"])],
+            int(row["bucket_epoch"]),
+        )
+    )
     result_rows = [
         {**row, "configuration_kind": kind}
         for kind, rows in (("control", controls), ("clustered", alpha_rows))
         for row in rows
     ]
+    _validate_selected_trace_rows(
+        selected_trace_rows,
+        selected_trace_scope,
+        result_rows,
+        frame["bucket_epoch"].tolist(),
+        run_id,
+        len(sensor_ids),
+    )
+    state["configuration"] = None
+    state["metrics"] = None
+    results_path = artifacts / RESULTS_PATH
     _write_csv_records(results_path, result_rows)
     size_path = artifacts / CLUSTER_SIZES_PATH
     _write_csv_records(size_path, [
@@ -4906,6 +5608,8 @@ def _run_us325(
     pd.DataFrame(event_snapshots).drop_duplicates(
         subset=["config_id", "alpha_label", "synchronization_id"], keep="first"
     ).to_csv(snapshot_path, index=False, lineterminator="\n")
+    trace_path = artifacts / SELECTED_TRACE_PATH
+    _write_selected_trace_csv(trace_path, selected_trace_rows)
 
     revised = gates["revised_phase2"]
     comparisons = _build_comparisons(
@@ -4921,25 +5625,18 @@ def _run_us325(
         "automatic_png_exports": False,
     }
 
-    replay_specs = [
-        (control["config_id"], "not_applicable", control)
-        for control in controls
-        if control["config_id"] in ("C1", "C2")
-    ]
-    replay_specs.extend(
-        (method, alpha_label, next(
-            row for row in alpha_rows
-            if row["algorithm"] == method and row["alpha_label"] == alpha_label
-        ))
-        for method, alpha_label in (
-            ("FMIC", "0.10"),
-            ("SMIC", "0.10"),
-            ("FMIC", "0.65"),
-            ("SMIC", "0.65"),
-        )
-    )
     replay_results = {}
-    for method, alpha_label, expected in replay_specs:
+    for selected in selected_trace_scope:
+        method = selected["config_id"]
+        alpha_label = selected["alpha_label"]
+        expected = next(
+            row for row in result_rows
+            if row["config_id"] == method and row["alpha_label"] == alpha_label
+        )
+        replay_trace = [
+            row for row in selected_trace_rows
+            if row["config_id"] == method and row["alpha_label"] == alpha_label
+        ]
         state["configuration"] = {
             "config_id": method,
             "algorithm": expected["algorithm"],
@@ -4948,7 +5645,12 @@ def _run_us325(
         state["stage"] = "fresh_process_replay"
         state["metrics"] = None
         replay_results[f"{method}:{alpha_label}"] = _run_fresh_process_replay(
-            root, method, alpha_label, expected
+            root,
+            method,
+            alpha_label,
+            expected,
+            selection_reasons=selected["selection_reasons"],
+            expected_trace_sha256=_selected_trace_content_sha256(replay_trace),
         )
 
     state["configuration"] = None
@@ -5028,6 +5730,7 @@ def _run_us325(
             "results": results_path.name,
             "cluster_size_summary": size_path.name,
             "event_snapshots": snapshot_path.name,
+            "selected_minute_trace": trace_path.name,
             "summary": SUMMARY_PATH,
             "reused_C0_event_source": _relative_artifact_path(
                 artifacts, operational_dir / EQUIVALENCE_EVENTS_PATH,
@@ -5210,9 +5913,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--replay", action="store_true")
     parser.add_argument("--method", choices=("C1", "C2", "FMIC", "SMIC"))
     parser.add_argument("--alpha", choices=(*ALPHA_LABELS, "not_applicable"))
+    parser.add_argument(
+        "--trace-selection-reasons",
+        help="JSON string of selected-trace reasons to independently replay with this configuration.",
+    )
     args = parser.parse_args(argv)
     if args.equivalence:
-        if args.replay or args.historical_sweep or args.validation_record or args.method or args.alpha:
+        if (
+            args.replay or args.historical_sweep or args.validation_record
+            or args.method or args.alpha or args.trace_selection_reasons
+        ):
             parser.error("--equivalence accepts only --root and --output-dir.")
         if args.output_dir is None:
             parser.error("--equivalence requires a separate --output-dir.")
@@ -5229,7 +5939,7 @@ def main(argv: list[str] | None = None) -> int:
         }, indent=2))
         return 0 if result["status"] == "passed" else 1
     if args.historical_sweep:
-        if args.replay or args.output_dir or args.validation_record:
+        if args.replay or args.output_dir or args.validation_record or args.trace_selection_reasons:
             parser.error("--historical-sweep cannot be combined with revised-run options.")
         print(json.dumps(run_phase3a_alpha_sweep(args.root.resolve()), indent=2))
         return 0
@@ -5238,8 +5948,21 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--replay requires --method and --alpha.")
         if args.output_dir or args.validation_record:
             parser.error("--replay is read-only and cannot accept production output/validation options.")
-        print(json.dumps(_replay(args.root.resolve(), args.method, args.alpha), sort_keys=True))
+        selection_reasons = None
+        if args.trace_selection_reasons:
+            try:
+                selection_reasons = json.loads(args.trace_selection_reasons)
+            except json.JSONDecodeError as error:
+                parser.error(f"--trace-selection-reasons must be JSON: {error}")
+            if not isinstance(selection_reasons, list):
+                parser.error("--trace-selection-reasons must be a JSON list.")
+        print(json.dumps(
+            _replay(args.root.resolve(), args.method, args.alpha, selection_reasons),
+            sort_keys=True,
+        ))
         return 0
+    if args.trace_selection_reasons:
+        parser.error("--trace-selection-reasons requires --replay.")
     report = run_us325(args.root, args.output_dir, args.validation_record)
     print(json.dumps({
         "status": report["status"],

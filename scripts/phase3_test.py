@@ -1046,14 +1046,17 @@ class FMICProtocolTests(unittest.TestCase):
 class ProductionIntegrationTests(unittest.TestCase):
     """Check import safety, isolated publication, and legacy runner compatibility."""
 
-    def test_only_three_phase3_executable_files_remain(self):
-        """Keep the maintained Phase 3 implementation/test/analysis surface exact."""
+    def test_only_maintained_phase3_entry_points_remain(self):
+        """Keep the maintained Phase 3 implementation, tests, and notebooks exact."""
         repository = Path(__file__).resolve().parents[1]
         self.assertEqual(
             {path.name for path in (repository / "scripts").iterdir()
              if "phase3" in path.stem and path.suffix in (".py", ".ipynb")
              and not path.name.startswith("test_phase1_")},
-            {"phase3_implement.py", "phase3_test.py", "phase3_analyze.ipynb"},
+            {
+                "phase3_implement.py", "phase3_test.py", "phase3_analyze.ipynb",
+                "phase3_run.ipynb",
+            },
         )
         for name in (
             "Phase3AHistoryTracker", "evaluate_alpha_clustering",
@@ -2568,6 +2571,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
     def test_zero_allowance_unchanged_and_both_crossing_directions(self):
         """Preserve zero-allowance triggers and detect both state crossings."""
         data, columns = frame([[10, 10], [10, 10], [11, 11], [9, 9]])
+        trace = []
         summary, _, events = _run_monitor(
             ENGINE.FMICMonitor,
             data,
@@ -2576,6 +2580,15 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             "FMIC",
             alpha=0.1,
             fixed_singletons=True,
+            trace_rows=trace,
+            trace_identity={
+                "run_id": "zero-allowance",
+                "config_id": "C1",
+                "algorithm": "FMIC",
+                "alpha_label": "not_applicable",
+                "configuration_kind": "control",
+                "selection_reasons": '["fixed_singleton_control"]',
+            },
         )
         self.assertEqual(summary["root_synchronization_count"], 4)
         self.assertEqual(summary["coordinator_check_count"], 6)
@@ -2586,6 +2599,14 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         self.assertEqual(summary["correctness_status"], "passed")
         self.assertEqual([event["root_allowance"] for event in events], [0, 0, 1, 1])
         self.assertEqual(summary["total_messages"], 30)
+        self.assertEqual(json.loads(trace[1]["entry_node_allowances"]), {
+            "A": 0.0, "B": 0.0,
+        })
+        self.assertEqual(json.loads(trace[1]["sensor_triggering_ids"]), ["A", "B"])
+        self.assertEqual(
+            [item["outcome"] for item in json.loads(trace[1]["cluster_checks"])],
+            ["escalated", "escalated"],
+        )
 
     def test_zero_weight_sensor_triggers_with_positive_root_allowance(self):
         """Retain zero-weight sensor behavior under a positive root allowance."""
@@ -2611,6 +2632,128 @@ class ControlAndDiagnosticTests(unittest.TestCase):
         self.assertEqual(summary["message_category_totals"]["cluster_check_requests"], 0)
         self.assertEqual(summary["message_category_totals"]["cluster_check_responses"], 0)
         self.assertEqual(next(row for row in by_size if row["cluster_size"] == 2)["coordinator_check_count"], 1)
+
+
+class SelectedTraceTests(unittest.TestCase):
+    """Cover selected-grid deduplication and minute-level decision capture."""
+
+    def test_selection_deduplicates_prespecified_and_tied_minima(self):
+        controls = [
+            {"config_id": "C0", "algorithm": "equal_allowance", "alpha_label": "not_applicable"},
+            {"config_id": "C1", "algorithm": "FMIC", "alpha_label": "not_applicable"},
+            {"config_id": "C2", "algorithm": "SMIC", "alpha_label": "not_applicable"},
+        ]
+        alpha_rows = [
+            {"algorithm": "FMIC", "alpha_label": "0.10", "total_messages": 1},
+            {"algorithm": "FMIC", "alpha_label": "0.15", "total_messages": 1},
+            {"algorithm": "FMIC", "alpha_label": "0.20", "total_messages": 1},
+            {"algorithm": "SMIC", "alpha_label": "0.10", "total_messages": 2},
+            {"algorithm": "SMIC", "alpha_label": "0.15", "total_messages": 2},
+        ]
+        scope = implementation._selected_trace_scope(
+            controls,
+            alpha_rows,
+            {
+                "FMIC": {"alpha_labels": ["0.10", "0.15", "0.20"]},
+                "SMIC": {"alpha_labels": ["0.10", "0.15"]},
+            },
+        )
+        self.assertEqual(len(scope), 7)
+        fmic_preset = next(
+            row for row in scope
+            if row["config_id"] == "FMIC" and row["alpha_label"] == "0.10"
+        )
+        self.assertEqual(
+            fmic_preset["selection_reasons"],
+            ["prespecified_alpha_0.10", "minimum_message_count"],
+        )
+        self.assertEqual(
+            [(row["config_id"], row["alpha_label"]) for row in scope],
+            [
+                ("C1", "not_applicable"), ("C2", "not_applicable"),
+                ("FMIC", "0.10"), ("FMIC", "0.15"), ("FMIC", "0.20"),
+                ("SMIC", "0.10"), ("SMIC", "0.15"),
+            ],
+        )
+
+    def test_cluster_trace_reconciles_initial_local_and_escalated_minutes(self):
+        data, columns = frame([[0, 0], [1.5, -0.75], [3, 0]])
+        trace = []
+        summary, _, _ = _run_monitor(
+            ENGINE.FMICMonitor,
+            data,
+            columns,
+            1.0,
+            "FMIC",
+            alpha=0.1,
+            fixed_singletons=False,
+            clustering=paired_clustering,
+            allocation_strategy=weighted_allocation(ENGINE, {"A": 1.0, "B": 1.0}),
+            trace_rows=trace,
+            trace_identity={
+                "run_id": "synthetic-trace",
+                "config_id": "FMIC",
+                "algorithm": "FMIC",
+                "alpha_label": "0.10",
+                "configuration_kind": "clustered",
+                "selection_reasons": (
+                    '["prespecified_alpha_0.10","minimum_message_count"]'
+                ),
+            },
+        )
+        result = {
+            "config_id": "FMIC",
+            "alpha_label": "0.10",
+            "algorithm": "FMIC",
+            "total_messages": summary["total_messages"],
+            "root_synchronization_count": summary["root_synchronization_count"],
+            "coordinator_check_count": summary["coordinator_check_count"],
+            "checks_escalated": summary["checks_escalated"],
+            "node_trigger_count": summary["node_trigger_count"],
+            "false_safe_count": summary["false_safe_count"],
+            "false_violated_count": summary["false_violated_count"],
+            "global_threshold_violation_count": summary["global_threshold_violation_count"],
+            **summary["message_category_totals"],
+        }
+        scope = [{
+            "config_id": "FMIC", "algorithm": "FMIC", "alpha_label": "0.10",
+            "configuration_kind": "clustered",
+            "selection_reasons": ["prespecified_alpha_0.10", "minimum_message_count"],
+        }]
+        implementation._validate_selected_trace_rows(
+            trace, scope, [result], data["bucket_epoch"].tolist(),
+            "synthetic-trace", len(columns),
+        )
+        self.assertEqual(len(trace), 3)
+        self.assertEqual(trace[0]["entry_references"], "null")
+        self.assertEqual(json.loads(trace[0]["synchronization_causes"]), ["initialization"])
+        self.assertEqual(trace[1]["sensor_triggering_ids"], '["A"]')
+        self.assertEqual(
+            json.loads(trace[1]["cluster_checks"])[0]["outcome"],
+            "locally_resolved",
+        )
+        self.assertFalse(trace[1]["synchronized"])
+        self.assertTrue(trace[2]["synchronized"])
+        self.assertEqual(
+            json.loads(trace[2]["synchronization_causes"]),
+            ["coordinator_violation"],
+        )
+        self.assertEqual(
+            json.loads(trace[1]["entry_references"]),
+            json.loads(trace[0]["exit_references"]),
+        )
+        with self.assertRaisesRegex(ValueError, "row count"):
+            implementation._validate_selected_trace_rows(
+                trace[:-1], scope, [result], data["bucket_epoch"].tolist(),
+                "synthetic-trace", len(columns),
+            )
+        mixed = [dict(row) for row in trace]
+        mixed[-1]["run_id"] = "stale-run"
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            implementation._validate_selected_trace_rows(
+                mixed, scope, [result], data["bucket_epoch"].tolist(),
+                "synthetic-trace", len(columns),
+            )
 
 
 LEGACY_COVERAGE = {'test_phase3_history.py': ['ClusteringTests', 'NormalizationTests', 'Phase3AExecutionTests'], 'test_phase3_monitoring.py': ['FirstMomentTests', 'SecondMomentTests', 'FMICProtocolTests', 'ProductionIntegrationTests', 'SMICProtocolTests'], 'test_phase3a_protocol_equivalence.py': ['SyntheticProtocolTests', 'ProductionReproducibilityTests'], 'test_phase3a_us325.py': ['CompositionTests', 'ControlAndDiagnosticTests']}
@@ -2753,6 +2896,21 @@ def _write_reference_tables(directory):
                 sizes.append({**row, "alpha_label": "not_applicable"} if control else row)
     implementation._write_csv_records(directory / implementation.CLUSTER_SIZES_PATH, sizes)
     shutil.copy2(root / "phase3a_us325_event_snapshots.csv", directory / implementation.SNAPSHOTS_PATH)
+    trace_row = {
+        column: "" for column in implementation.SELECTED_TRACE_COLUMNS
+    }
+    trace_row.update({
+        "run_id": "fixture",
+        "config_id": "C1",
+        "algorithm": "FMIC",
+        "alpha_label": "not_applicable",
+        "configuration_kind": "control",
+        "selection_reasons": '["fixed_singleton_control"]',
+        "bucket_epoch": 0,
+    })
+    implementation._write_selected_trace_csv(
+        directory / implementation.SELECTED_TRACE_PATH, [trace_row],
+    )
     operational = implementation._resolve_operational_dir(directory)
     operational.mkdir(parents=True, exist_ok=True)
     shutil.copy2(
@@ -3067,6 +3225,307 @@ def _verify_snapshots(directory, indexed, contract, averages):
     return len(rows)
 
 
+def _verify_selected_trace(
+    directory, indexed, contract, observations, columns, averages, report,
+):
+    """Independently validate selected trace scope, source values, and reconciliation."""
+    path = directory / implementation.SELECTED_TRACE_PATH
+    with path.open(encoding="utf-8", newline="") as stream:
+        reader = csv.DictReader(stream)
+        _require(
+            tuple(reader.fieldnames or ()) == implementation.SELECTED_TRACE_COLUMNS,
+            "Selected trace ordered schema mismatch",
+        )
+        rows = list(reader)
+    scope = []
+    for config_id, alpha_label, reason in (
+        ("C1", "not_applicable", "fixed_singleton_control"),
+        ("C2", "not_applicable", "fixed_singleton_control"),
+    ):
+        scope.append({
+            "config_id": config_id, "algorithm": indexed[config_id, alpha_label]["algorithm"],
+            "alpha_label": alpha_label, "configuration_kind": "control",
+            "selection_reasons": [reason],
+        })
+    for method in ("FMIC", "SMIC"):
+        minimum = min(
+            row["total_messages"] for key, row in indexed.items() if key[0] == method
+        )
+        labels = sorted(
+            key[1] for key, row in indexed.items()
+            if key[0] == method and row["total_messages"] == minimum
+        )
+        _require(
+            report["alpha_minima"][method]["minimum_total_messages"] == minimum
+            and report["alpha_minima"][method]["alpha_labels"] == labels,
+            f"{method}: trace selection minima differ from result rows",
+        )
+        for alpha_label in sorted({"0.10", *labels}, key=float):
+            reasons = []
+            if alpha_label == "0.10":
+                reasons.append("prespecified_alpha_0.10")
+            if alpha_label in labels:
+                reasons.append("minimum_message_count")
+            scope.append({
+                "config_id": method, "algorithm": method,
+                "alpha_label": alpha_label, "configuration_kind": "clustered",
+                "selection_reasons": reasons,
+            })
+    expected_order = [
+        (item["config_id"], item["alpha_label"], int(epoch))
+        for item in scope
+        for epoch in observations["bucket_epoch"].tolist()
+    ]
+    _require(
+        len(rows) == len(expected_order)
+        and [
+            (row["config_id"], row["alpha_label"], int(row["bucket_epoch"]))
+            for row in rows
+        ] == expected_order,
+        "Selected trace has missing, extra, duplicate, or unordered configuration-minute rows",
+    )
+    run_id = report["run_id"]
+    source = {
+        int(row[0]): row[1:]
+        for row in observations[
+            ["bucket_epoch", "bucket_time_utc", *columns]
+        ].itertuples(index=False, name=None)
+    }
+    scope_by_key = {
+        (item["config_id"], item["alpha_label"]): item for item in scope
+    }
+    grouped = {key: [] for key in scope_by_key}
+    previous = {}
+    for row in rows:
+        key = (row["config_id"], row["alpha_label"])
+        expected = scope_by_key[key]
+        _require(
+            row["run_id"] == run_id
+            and row["algorithm"] == expected["algorithm"]
+            and row["configuration_kind"] == expected["configuration_kind"]
+            and json.loads(row["selection_reasons"]) == expected["selection_reasons"],
+            f"{key}: trace configuration/run provenance mismatch",
+        )
+        grouped[key].append(row)
+        epoch = _number(row["bucket_epoch"], "trace/bucket_epoch", integer=True)
+        _require(epoch in source and epoch in averages, f"{key}: trace bucket is absent from input")
+        input_row = source[epoch]
+        values = json.loads(row["observed_sensor_values"])
+        expected_values = {
+            column.removesuffix("_temperature"): float(value)
+            for column, value in zip(columns, input_row[1:])
+        }
+        _require(
+            values == expected_values
+            and row["bucket_time_utc"] == pd.Timestamp(input_row[0]).isoformat(),
+            f"{key}/{epoch}: trace sensor observations or timestamp differ from input",
+        )
+        average = math.fsum(values.values()) / len(columns)
+        _same_number(row["observed_global_average"], average, f"{key}/{epoch}/average")
+        _require(
+            float(row["p90_threshold"]) == contract["threshold"]
+            and row["global_violated"] == str(average >= contract["threshold"]),
+            f"{key}/{epoch}: trace oracle or threshold differs from source",
+        )
+        for field in (
+            "entry_references", "entry_node_allowances", "entry_coordinator_allowances",
+            "entry_partition", "entry_coordinator_assignments", "entry_known_state",
+            "exit_references", "exit_node_allowances", "exit_coordinator_allowances",
+            "exit_partition", "exit_coordinator_assignments",
+        ):
+            _require(row[field] != "", f"{key}/{epoch}: {field} must encode JSON null/empty distinctly")
+            json.loads(row[field])
+        sensors = contract["config"]["selected_sensor_ids"]
+        exit_partition = json.loads(row["exit_partition"])
+        exit_assignments = json.loads(row["exit_coordinator_assignments"])
+        exit_references = json.loads(row["exit_references"])
+        exit_node_allowances = json.loads(row["exit_node_allowances"])
+        exit_coordinator_allowances = json.loads(row["exit_coordinator_allowances"])
+        _require(
+            isinstance(exit_partition, list)
+            and all(isinstance(cluster, list) and cluster for cluster in exit_partition)
+            and sorted(sensor for cluster in exit_partition for sensor in cluster) == sensors
+            and len({sensor for cluster in exit_partition for sensor in cluster}) == len(sensors)
+            and exit_assignments == {
+                str(index): max(cluster)
+                for index, cluster in enumerate(exit_partition)
+            }
+            and set(exit_references) == set(sensors)
+            and set(exit_node_allowances) == set(sensors)
+            and set(exit_coordinator_allowances)
+            == {max(cluster) for cluster in exit_partition}
+            and row["exit_known_state"] in ("SAFE", "VIOLATED"),
+            f"{key}/{epoch}: exit partition, coordinator, or root state is malformed",
+        )
+        for sensor in sensors:
+            _number(exit_references[sensor], f"{key}/{epoch}/exit-reference/{sensor}")
+            _number(
+                exit_node_allowances[sensor],
+                f"{key}/{epoch}/exit-node-allowance/{sensor}",
+                nonnegative=True,
+            )
+        for coordinator, allowance in exit_coordinator_allowances.items():
+            _number(
+                allowance,
+                f"{key}/{epoch}/exit-coordinator-allowance/{coordinator}",
+                nonnegative=True,
+            )
+        prior = previous.get(key)
+        if prior is None:
+            _require(
+                row["initialization"] == "True"
+                and all(json.loads(row[field]) is None for field in (
+                    "entry_references", "entry_node_allowances",
+                    "entry_coordinator_allowances", "entry_partition",
+                    "entry_coordinator_assignments", "entry_known_state",
+                ))
+                and json.loads(row["synchronization_causes"]) == ["initialization"],
+                f"{key}: initialization/absent entry state is not explicit",
+            )
+        else:
+            _require(
+                row["initialization"] == "False"
+                and epoch - int(prior["bucket_epoch"]) == 60
+                and json.loads(row["entry_references"]) == json.loads(prior["exit_references"])
+                and json.loads(row["entry_node_allowances"]) == json.loads(prior["exit_node_allowances"])
+                and json.loads(row["entry_coordinator_allowances"])
+                == json.loads(prior["exit_coordinator_allowances"])
+                and json.loads(row["entry_partition"]) == json.loads(prior["exit_partition"])
+                and json.loads(row["entry_coordinator_assignments"])
+                == json.loads(prior["exit_coordinator_assignments"])
+                and json.loads(row["entry_known_state"]) == prior["exit_known_state"],
+                f"{key}/{epoch}: entry state does not carry forward from preceding minute",
+            )
+        previous[key] = row
+
+        checks = json.loads(row["cluster_checks"])
+        triggering_ids = json.loads(row["sensor_triggering_ids"])
+        causes = json.loads(row["synchronization_causes"])
+        entry_partition = json.loads(row["entry_partition"])
+        observed_triggers = []
+        check_totals = dict.fromkeys(TRANSMISSIONS[:4], 0)
+        for check in checks:
+            members = check["cluster_members"]
+            coordinator = check["coordinator"]
+            triggers = check["sensor_triggering_ids"]
+            refs = json.loads(row["entry_references"])
+            node_allowances = json.loads(row["entry_node_allowances"])
+            coordinator_allowances = json.loads(row["entry_coordinator_allowances"])
+            _require(
+                members in (entry_partition or [])
+                and coordinator == max(members)
+                and set(triggers).issubset(members)
+                and set(check["sensor_deviations"]) == set(members)
+                and set(check["node_allowances"]) == set(members),
+                f"{key}/{epoch}: check is not associated with its entry cluster/coordinator",
+            )
+            _require(
+                set(refs) == set(sensors)
+                and set(node_allowances) == set(sensors)
+                and set(coordinator_allowances) == {max(cluster) for cluster in entry_partition},
+                f"{key}/{epoch}: entry references or allowances do not cover the current partition",
+            )
+            for sensor in members:
+                deviation = values[sensor] - refs[sensor]
+                _same_number(check["sensor_deviations"][sensor], deviation, f"{key}/{epoch}/{sensor}/deviation")
+                _same_number(check["node_allowances"][sensor], node_allowances[sensor], f"{key}/{epoch}/{sensor}/allowance")
+                if abs(deviation) >= node_allowances[sensor]:
+                    observed_triggers.append(sensor)
+            requested = sorted(set(members) - set(triggers) - {coordinator})
+            _require(
+                check["requested_peer_sensor_ids"] == requested
+                and check["responding_peer_sensor_ids"] == requested,
+                f"{key}/{epoch}: coordinator peer requests/responses mismatch",
+            )
+            signed_change = math.fsum(check["sensor_deviations"].values()) / len(members)
+            _same_number(check["signed_mean_deviation"], signed_change, f"{key}/{epoch}/cluster change")
+            _same_number(
+                check["absolute_mean_deviation"], abs(signed_change),
+                f"{key}/{epoch}/absolute cluster change",
+            )
+            should_escalate = abs(signed_change) >= coordinator_allowances[coordinator]
+            _require(
+                bool(check["escalated"]) == should_escalate
+                and check["outcome"] == (
+                    "escalated" if should_escalate else "locally_resolved"
+                ),
+                f"{key}/{epoch}: coordinator outcome differs from the recorded allowance",
+            )
+            check_totals["node_trigger_messages"] += len(set(triggers) - {coordinator})
+            check_totals["cluster_check_requests"] += len(requested)
+            check_totals["cluster_check_responses"] += len(requested)
+            check_totals["coordinator_root_escalations"] += int(should_escalate)
+        _require(
+            sorted(observed_triggers) == triggering_ids
+            and len(checks) == int(row["coordinator_check_count"])
+            and sum(bool(check["escalated"]) for check in checks)
+            == int(row["coordinator_escalation_count"]),
+            f"{key}/{epoch}: trigger/check counts differ from per-cluster decisions",
+        )
+        synchronized = row["synchronized"] == "True"
+        _require(
+            synchronized == bool(causes)
+            and (not synchronized or causes in (["initialization"], ["coordinator_violation"]))
+            and (synchronized or causes == [])
+            and int(row["root_sync_requests"]) == 6 * int(synchronized)
+            and int(row["root_sync_responses"]) == 6 * int(synchronized)
+            and int(row["root_state_updates"]) == 6 * int(synchronized),
+            f"{key}/{epoch}: synchronization cause or root collection differs",
+        )
+        for field, expected_count in check_totals.items():
+            _require(int(row[field]) == expected_count, f"{key}/{epoch}: {field} does not reconcile")
+        _require(
+            int(row["total_messages"]) == sum(int(row[field]) for field in TRANSMISSIONS)
+            and row["false_safe"] == str(
+                average >= contract["threshold"] and row["exit_known_state"] != "VIOLATED"
+            )
+            and row["false_violated"] == str(
+                average < contract["threshold"] and row["exit_known_state"] == "VIOLATED"
+            ),
+            f"{key}/{epoch}: minute message total or offline correctness indicators mismatch",
+        )
+
+    reconcile_fields = {
+        "total_messages": "total_messages",
+        "root_synchronization_count": "synchronized",
+        "coordinator_check_count": "coordinator_check_count",
+        "checks_escalated": "coordinator_escalation_count",
+        "false_safe_count": "false_safe",
+        "false_violated_count": "false_violated",
+        "global_threshold_violation_count": "global_violated",
+        **{name: name for name in TRANSMISSIONS},
+    }
+    for key, selected_rows in grouped.items():
+        result = indexed[key]
+        for result_field, trace_field in reconcile_fields.items():
+            total = sum(
+                int(row[trace_field] == "True")
+                if trace_field in ("synchronized", "false_safe", "false_violated", "global_violated")
+                else int(row[trace_field])
+                for row in selected_rows
+            )
+            _require(total == result[result_field], f"{key}/{result_field}: selected trace/result mismatch")
+        _require(
+            sum(len(json.loads(row["sensor_triggering_ids"])) for row in selected_rows)
+            == result["node_trigger_count"],
+            f"{key}: selected trace node trigger total mismatch",
+        )
+    return len(rows)
+
+
+def _selected_trace_content_sha256(rows):
+    """Hash normalized trace rows so a replay's fresh run ID is immaterial."""
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        stream,
+        fieldnames=implementation.SELECTED_TRACE_COLUMNS,
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    writer.writerows({**row, "run_id": "__replay__"} for row in rows)
+    return hashlib.sha256(stream.getvalue().encode("utf-8")).hexdigest()
+
+
 def _directory_hashes(directory):
     """Hash all files under one saved-results directory using relative paths."""
     _require(directory.is_dir(), f"Saved-output directory does not exist: {directory}")
@@ -3148,6 +3607,18 @@ def verify_saved_outputs(directory):
                 f"comparison table/{key}/centralized reduction",
             )
         snapshots = _verify_snapshots(directory, indexed, contract, averages)
+        selected_trace_count = _verify_selected_trace(
+            directory, indexed, contract, observations, columns, averages, report,
+        )
+        trace_metadata = run["artifacts"][
+            f"outputs/{implementation.SELECTED_TRACE_PATH}"
+        ]
+        _require(
+            selected_trace_count == trace_metadata["row_count"]
+            and trace_metadata["columns"] == list(implementation.SELECTED_TRACE_COLUMNS)
+            and trace_metadata["schema_version"] == implementation.SELECTED_TRACE_SCHEMA_VERSION,
+            "Selected trace artifact metadata does not match the independently verified CSV",
+        )
         # Recompute the equal-allowance trace from observations, not saved status flags.
         phase2 = build_phase2_trace(observations, columns, contract["threshold"], round_output=False)
         c0 = run_phase3_control(observations, columns, contract["threshold"], FMICMonitor)
@@ -3162,9 +3633,30 @@ def verify_saved_outputs(directory):
                 "Saved C0 events differ from fresh source-derived equivalence",
             )
         replay_records = report["reproducibility"]["fresh_process_replays"]
-        _require(set(replay_records) == {f"{method}:{alpha}" for method, alpha, _, _ in REPLAY_SPECS}, "Incomplete saved replay coverage")
-        for method, alpha, _, _ in REPLAY_SPECS:
-            _compare_replay(replay_records[f"{method}:{alpha}"], indexed[method, alpha])
+        selected_scope = trace_metadata["selection_scope"]
+        replay_keys = {
+            f"{item['config_id']}:{item['alpha_label']}" for item in selected_scope
+        }
+        _require(set(replay_records) == replay_keys, "Selected-trace replay coverage differs from selected configurations")
+        trace_by_key = {}
+        with (directory / implementation.SELECTED_TRACE_PATH).open(
+            encoding="utf-8", newline="",
+        ) as trace_stream:
+            for row in csv.DictReader(trace_stream):
+                trace_by_key.setdefault(
+                    (row["config_id"], row["alpha_label"]), []
+                ).append(row)
+        for item in selected_scope:
+            method, alpha = item["config_id"], item["alpha_label"]
+            replay = replay_records[f"{method}:{alpha}"]
+            _compare_replay(replay, indexed[method, alpha])
+            expected_trace_rows = trace_by_key[(method, alpha)]
+            _require(
+                replay.get("selected_trace_row_count") == len(expected_trace_rows)
+                and replay.get("selected_trace_sha256")
+                == _selected_trace_content_sha256(expected_trace_rows),
+                f"{method}/{alpha}: saved selected trace differs from its isolated replay",
+            )
         analysis_inputs = implementation.load_phase3_analysis_results(ROOT, directory)
         _require(
             len(analysis_inputs["controls"]) == 3 and len(analysis_inputs["alphas"]) == 38,
@@ -3195,17 +3687,68 @@ def _compare_replay(actual, expected):
 
 
 def verify_production_replays(directory=None):
-    """Run isolated subprocess replays and compare them with current references."""
+    """Run isolated selected-configuration replays and compare full trace content."""
     before = _paired_directory_hashes(directory) if directory is not None else None
     try:
         if directory is not None:
-            report = implementation.load_phase3_run(ROOT, directory)["comparison"]
+            loaded = implementation.load_phase3_run(ROOT, directory)
+            report = loaded["comparison"]
             _verify_saved_provenance(directory, report)
-        indexed = _verify_result_tables(directory, 19984, 1999) if directory is not None else None
-        for method, alpha, messages, syncs in REPLAY_SPECS:
+            indexed = _verify_result_tables(directory, 19984, 1999)
+            selected_scope = loaded["artifacts"][
+                f"outputs/{implementation.SELECTED_TRACE_PATH}"
+            ]["selection_scope"]
+        else:
+            reference = implementation._phase3_reference_directory(ROOT)
+            controls = pd.read_csv(
+                reference / "phase3a_us325_control_results.csv",
+                dtype={"alpha_label": str},
+            ).to_dict(orient="records")
+            alphas = pd.read_csv(
+                reference / "phase3a_us325_alpha_results.csv",
+                dtype={"alpha_label": str},
+            ).to_dict(orient="records")
+            minima = {}
+            for method in ("FMIC", "SMIC"):
+                minimum = min(
+                    int(row["total_messages"]) for row in alphas
+                    if row["algorithm"] == method
+                )
+                minima[method] = {
+                    "alpha_labels": sorted(
+                        row["alpha_label"] for row in alphas
+                        if row["algorithm"] == method
+                        and int(row["total_messages"]) == minimum
+                    ),
+                }
+            selected_scope = implementation._selected_trace_scope(
+                controls, alphas, minima,
+            )
+            indexed = None
+        contract = implementation._validate_contract(ROOT)
+        observations, columns = implementation._read_locked_observations(contract)
+        selected_keys = {
+            (item["config_id"], item["alpha_label"]) for item in selected_scope
+        }
+        fixed_references = {
+            (method, alpha): (messages, syncs)
+            for method, alpha, messages, syncs in REPLAY_SPECS
+        }
+        trace_groups = {}
+        if directory is not None:
+            trace_path = directory / implementation.SELECTED_TRACE_PATH
+            with trace_path.open(encoding="utf-8", newline="") as stream:
+                for row in csv.DictReader(stream):
+                    trace_groups.setdefault(
+                        (row["config_id"], row["alpha_label"]), []
+                    ).append(row)
+        for selected in selected_scope:
+            method, alpha = selected["config_id"], selected["alpha_label"]
             command = [
                 sys.executable, "-B", "-m", "scripts.phase3_implement", "--root", str(ROOT),
                 "--replay", "--method", method, "--alpha", alpha,
+                "--trace-selection-reasons",
+                implementation._trace_json(selected["selection_reasons"]),
             ]
             with tempfile.TemporaryDirectory() as temporary:
                 environment = dict(os.environ, PYTHONPATH=str(ROOT))
@@ -3215,32 +3758,56 @@ def verify_production_replays(directory=None):
                 _require(child.returncode == 0, f"Replay failed:\n{child.stdout}\n{child.stderr}")
                 _require(list(Path(temporary).iterdir()) == [], "Read-only replay wrote files")
             actual = json.loads(child.stdout)
-            _require(
-                actual["total_messages"] == messages and actual["root_synchronization_count"] == syncs
-                and actual["false_safe_count"] == actual["false_violated_count"] == 0,
-                f"{method}/{alpha}: preserved replay reference mismatch",
-            )
-            if indexed is None:
-                contract = implementation._validate_contract(ROOT)
-                observations, columns = implementation._read_locked_observations(contract)
-                row, _, _ = (
-                    implementation._run_control(implementation, observations, columns, contract["threshold"], "FMIC" if method == "C1" else "SMIC")
-                    if method in ("C1", "C2") else
-                    implementation._run_alpha(implementation, observations, columns, contract["threshold"], method, alpha)
+            key = (method, alpha)
+            if key in fixed_references:
+                messages, syncs = fixed_references[key]
+                _require(
+                    actual["total_messages"] == messages
+                    and actual["root_synchronization_count"] == syncs
+                    and actual["false_safe_count"] == actual["false_violated_count"] == 0,
+                    f"{method}/{alpha}: preserved replay reference mismatch",
                 )
-            else:
+            if indexed is not None:
                 row = indexed[method, alpha]
+                expected_trace_rows = trace_groups[key]
+            else:
+                trace_rows = []
+                row, _, _ = (
+                    implementation._run_control(
+                        implementation, observations, columns,
+                        contract["threshold"], "FMIC" if method == "C1" else "SMIC",
+                        trace_rows=trace_rows, run_id="__replay__",
+                    )
+                    if method in ("C1", "C2") else
+                    implementation._run_alpha(
+                        implementation, observations, columns,
+                        contract["threshold"], method, alpha,
+                        trace_rows=trace_rows, run_id="__replay__",
+                    )
+                )
+                for trace_row in trace_rows:
+                    trace_row["selection_reasons"] = implementation._trace_json(
+                        selected["selection_reasons"]
+                    )
+                expected_trace_rows = trace_rows
             _compare_replay(actual, row)
+            _require(
+                key in selected_keys
+                and actual.get("selected_trace_row_count") == len(expected_trace_rows)
+                and actual.get("selected_trace_sha256")
+                == _selected_trace_content_sha256(expected_trace_rows),
+                f"{method}/{alpha}: independently replayed selected trace differs",
+            )
     finally:
         if directory is not None:
             _require(before == _paired_directory_hashes(directory), "Replay verification modified saved outputs or operational evidence")
 
 
 class WeightedProductionReplayTests(unittest.TestCase):
-    """Replay all controls and weighted configurations in fresh processes."""
+    """Replay all selected controls and weighted configurations in fresh processes."""
 
-    def test_six_fresh_process_replays_match_independent_references_and_current_process(self):
-        """Compare six independent replays with references and current-process results."""
+    def test_selected_fresh_process_replays_match_references_and_current_process(self):
+        """Compare every selected replay and trace with current-process results."""
         verify_production_replays()
 
 
@@ -3280,6 +3847,20 @@ class AnalysisNotebookTests(unittest.TestCase):
              "existing-interpretation", "alpha-charts", "composition-charts",
              "diagnostic-tables", "historical-charts", "finish"},
         )
+
+    def test_runner_recovery_uses_the_complete_owned_output_file_list(self):
+        """Ensure future runs back up the selected trace with all owned outputs."""
+        notebook = json.loads(
+            (ROOT / "scripts" / "phase3_run.ipynb").read_text(encoding="utf-8")
+        )
+        source = "\n".join(
+            line for cell in notebook["cells"] if cell["cell_type"] == "code"
+            for line in cell["source"]
+        )
+        self.assertIn("(OUTPUT_DIR, phase3.OUTPUT_FILES)", source)
+        self.assertIn("(OPERATIONAL_DIR, phase3.OPERATIONAL_RUN_FILES)", source)
+        self.assertIn("backup_files.append", source)
+        self.assertIn(implementation.SELECTED_TRACE_PATH, implementation.OUTPUT_FILES)
 
     def test_analysis_loader_missing_inputs_fail_without_writes_or_replays(self):
         """Fail closed on missing analysis inputs without producing replacements."""
@@ -3387,8 +3968,8 @@ class SavedOutputValidationTests(unittest.TestCase):
 
     def test_artifact_names_and_csv_serialization_preserve_nulls_integers_and_precision(self):
         """Keep artifact basenames and CSV value serialization stable."""
-        self.assertEqual(len(implementation.BUNDLE_FILES), 7)
-        self.assertEqual(len(set(implementation.BUNDLE_FILES)), 7)
+        self.assertEqual(len(implementation.BUNDLE_FILES), 8)
+        self.assertEqual(len(set(implementation.BUNDLE_FILES)), 8)
         self.assertTrue(all(name.startswith("phase3_") for name in implementation.BUNDLE_FILES))
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / implementation.RESULTS_PATH
@@ -3463,8 +4044,16 @@ class SavedOutputValidationTests(unittest.TestCase):
                 "failures": {"status": "passed", "run_id": "fixture", "failure_count": 0, "failures": []},
                 "equivalence": {},
             }
-            for mutation in ("version", "kind", "status", "scope", "hash", "rows", "columns", "receipt", "extra"):
+            trace_path = directory / implementation.SELECTED_TRACE_PATH
+            for mutation in (
+                "version", "kind", "status", "scope", "hash", "rows", "columns",
+                "trace_schema", "trace_scope", "trace_hash", "trace_rows",
+                "trace_columns", "trace_size", "trace_file", "trace_missing",
+                "trace_run_id",
+                "receipt", "extra",
+            ):
                 record = copy.deepcopy(run)
+                original_trace = trace_path.read_bytes()
                 if mutation == "version":
                     record["schema_version"] = 3
                 elif mutation == "kind":
@@ -3476,6 +4065,42 @@ class SavedOutputValidationTests(unittest.TestCase):
                 elif mutation in ("hash", "rows", "columns"):
                     field = {"hash": "sha256", "rows": "row_count", "columns": "columns"}[mutation]
                     record["artifacts"][f"outputs/{implementation.RESULTS_PATH}"][field] = "corrupted"
+                elif mutation in (
+                    "trace_schema", "trace_scope", "trace_hash",
+                    "trace_rows", "trace_columns", "trace_size",
+                ):
+                    trace_metadata = record["artifacts"][
+                        f"outputs/{implementation.SELECTED_TRACE_PATH}"
+                    ]
+                    if mutation == "trace_schema":
+                        trace_metadata["schema_version"] = 99
+                    elif mutation == "trace_scope":
+                        trace_metadata["selection_scope"][0]["selection_reasons"] = ["wrong"]
+                    else:
+                        field = {
+                            "trace_hash": "sha256",
+                            "trace_rows": "row_count",
+                            "trace_columns": "columns",
+                            "trace_size": "size_bytes",
+                        }[mutation]
+                        trace_metadata[field] = "corrupted"
+                elif mutation in ("trace_file", "trace_missing", "trace_run_id"):
+                    if mutation == "trace_file":
+                        trace_path.write_bytes(original_trace + b"\n")
+                    elif mutation == "trace_missing":
+                        trace_path.unlink()
+                    else:
+                        with trace_path.open(newline="", encoding="utf-8") as stream:
+                            reader = csv.DictReader(stream)
+                            fields, rows = reader.fieldnames, list(reader)
+                        rows[0]["run_id"] = "another-run"
+                        with trace_path.open("w", newline="", encoding="utf-8") as stream:
+                            writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
+                            writer.writeheader()
+                            writer.writerows(rows)
+                        record["artifacts"] = implementation._artifact_inventory(
+                            directory, operational,
+                        )
                 elif mutation == "extra":
                     (directory / "legacy.json").write_text("{}")
                 (operational / RUN_PATH).write_text(json.dumps(record))
@@ -3483,9 +4108,13 @@ class SavedOutputValidationTests(unittest.TestCase):
                 with self.subTest(mutation=mutation), mock.patch.object(
                     implementation, "_read_validation_record",
                     return_value={"record_sha256": "actual independent receipt hash"},
-                ), self.assertRaises(ValueError):
+                ), self.assertRaises((ValueError, FileNotFoundError)):
                     implementation.load_phase3_run(ROOT, directory)
                 self.assertEqual(before, _paired_directory_hashes(directory))
+                if mutation in ("trace_file", "trace_run_id"):
+                    trace_path.write_bytes(original_trace)
+                elif mutation == "trace_missing":
+                    trace_path.write_bytes(original_trace)
                 if mutation == "extra":
                     (directory / "legacy.json").unlink()
 
@@ -3621,6 +4250,7 @@ def _build_suite(checks, output_dir=None, cross_phase=False):
             for name in classes:
                 if name != "ProductionReproducibilityTests":
                     suite.addTests(loader.loadTestsFromTestCase(globals()[name]))
+        suite.addTests(loader.loadTestsFromTestCase(SelectedTraceTests))
         suite.addTests(loader.loadTestsFromTestCase(SavedOutputValidationTests))
         suite.addTests(loader.loadTestsFromTestCase(AnalysisNotebookTests))
     if "saved" in checks:

@@ -735,26 +735,42 @@ stated.
 ### Active user-facing outputs and operational run files
 
 The current default production has run ID
-`2026-11-12T13:31:38.792440+00:00`. All three result tables and C0 events are
-byte-identical to their pre-cleanup `phase3_current/` counterparts.
+`2026-11-12T22:58:38.165659+00:00`. The three pre-existing result tables and
+C0 events remain byte-identical to their pre-trace recovery copies.
 
 | Active path | Meaning and producer / consumer | SHA-256 |
 |---|---|---|
 | `phase3_outputs/phase3_results.csv` | 41 user-facing control/clustered result rows; producer `scripts/phase3_implement.py`; readers `scripts/phase3_test.py` and `scripts/phase3_analyze.ipynb` | `8BFE508355FD1DE0254A5F4F17C3B65CA4E94B57ED99D7F16C79BAFE9D3B9BEF` |
 | `phase3_outputs/phase3_cluster_sizes.csv` | 246 diagnostic size-bin rows, including zero bins; producer `scripts/phase3_implement.py`; readers test and analysis | `2F0CF6EDB96904DD986D2345D610CB481B6A8EA0C7761158638786BA159B4AC2` |
 | `phase3_outputs/phase3_snapshots.csv` | 2,372 selected synchronization snapshots; producer `scripts/phase3_implement.py`; readers test and analysis | `B9C2C65B0EBB25BA960E8CF668F141B08E10B4BBD618E0A0DA1023B19A00AC6C` |
-| `phase3_outputs/phase3_summary.json` | Schema-version-1 user-readable comparison summary; producer `scripts/phase3_implement.py`; read-only analysis and saved verification | `D7B2393AACB4716A356D384636F226AFFC4B6F00038B6567AB1D86D5329488C0` |
-| `phase3_operational/phase3_run.json` | Schema-version-2 manifest with status/failure state, completion, provenance and hash inventory; written last by the producer; validated by tests and analysis | `3AC00CC64B2BA60A469F9B6DD2ECB4E52D327C698559C177531E950A7DFD9BA6` |
+| `phase3_outputs/phase3_selected_trace.csv` | 119,904 selected-configuration minute rows across six configurations; 163,626,312 bytes; producer `scripts/phase3_implement.py`; validated by tests and read-only analysis | `867AB20D72FC808114BED47EC4F52E27F749C171ECE3A0A7A8254234B08F550E` |
+| `phase3_outputs/phase3_summary.json` | Schema-version-1 user-readable comparison summary; producer `scripts/phase3_implement.py`; read-only analysis and saved verification | `28AB267F7253F2B58D339051D40007827FF3B8FD743CDF92BDF1B149E5AE584B` |
+| `phase3_operational/phase3_run.json` | Schema-version-2 manifest with status/failure state, completion, provenance and hash inventory; written last by the producer; validated by tests and analysis | `73138B6684BBB744FEE3E64908D149F32CF9FF00705F32622276ED3B8880C4A1` |
 | `phase3_operational/phase3_equivalence_events.csv` | 467 complete C0 initialization/root-sync events; producer reuses the validated reference; checked by tests/manifest and not substituted for snapshots | `FF4A89ECEC934A96456EEEFA5E154B580B6DDAC2251EF2711250380F2D489FCF` |
-| `phase3_operational/phase3_validation.json` | Fresh, independent schema-version-2 receipt for 170 tests, including the Phase 1/Phase 2 suites; producer `scripts/phase3_test.py`; hash-referenced by the summary | `AE8D09D951D0F7641B298658917E50066A6130C2CC7A25B605D8B9C3607E3F19` |
+| `phase3_operational/phase3_validation.json` | Current, independent schema-version-2 receipt for 175 tests, including the Phase 1/Phase 2 suites; producer `scripts/phase3_test.py`; hash-referenced by the summary | `F1403947890D2C6C78BEB39446DA9EEC15BEA03EC3C9D17EBCA5A4DA2DFACDF9` |
 
-The manifest hashes the three result CSVs, summary, and C0 events. The summary
-points to the independent receipt by relative path and SHA-256; the receipt's
-SHA-256 is `AE8D09D951D0F7641B298658917E50066A6130C2CC7A25B605D8B9C3607E3F19`.
+The manifest hashes the four result CSVs, summary, and C0 events. The selected
+trace is 163,626,312 bytes (about 156 MiB) for the current six-configuration
+scope; the exact scope, ordered schema, row count and key are recorded in its
+manifest inventory. The summary points to the independent receipt by relative
+path and SHA-256; the receipt's SHA-256 is
+`F1403947890D2C6C78BEB39446DA9EEC15BEA03EC3C9D17EBCA5A4DA2DFACDF9`.
 Every paired file carries the same run ID; missing, stale, failed, or mixed-run
 state is rejected. The read-only saved-results loader passed for this run and
-its bound evidence. The independently executed receipt replaces the archived
-receipt; the old receipt was not edited or reused for the changed code and paths.
+its bound evidence. The successful Run-All reused the current 175-test receipt;
+production took 520.648 seconds, saved-result/replay checks took 769.468 seconds,
+and the complete workflow took 1,290.579 seconds. These are observed end-to-end
+stage timings, not an isolated estimate of incremental trace overhead. At the
+US-3.34 cutover, the independently executed receipt
+replaced the archived receipt; the old receipt was not edited or reused for
+the changed code and paths.
+
+The US-3.36 one-click runner reuses a current receipt, runs production, and
+verifies saved results/replays. Before replacing canonical files it retains a
+per-run copy of the eight owned outputs/evidence files under
+`phase3_operational/runner_recovery/<run-id>/previous/`, alongside the runner
+status and per-stage subprocess logs. Recovery copies and logs are ignored
+local evidence and are not deleted by the workflow.
 
 ### Operational references copied from root-level originals
 

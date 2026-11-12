@@ -102,22 +102,23 @@ populations are explicitly distinguished.
 
 ## Phase 3 reporting output
 
-Phase 3 now has three maintained executable files:
-[implementation](scripts/phase3_implement.py),
-[independent testing](scripts/phase3_test.py), and
+Phase 3 has a one-click [run notebook](scripts/phase3_run.ipynb) that
+orchestrates the authoritative [implementation](scripts/phase3_implement.py)
+and [independent tests](scripts/phase3_test.py), followed by read-only
 [saved-results analysis](scripts/phase3_analyze.ipynb).
 See [current Phase 3 commands, prerequisites and rollback](scripts/README_scripts.md#us-334-phase3-output-and-operational-layout).
 Current Phase 3 results use the approved
 [`phase3_outputs` / `phase3_operational` layout](scripts/README_scripts.md#us-334-phase3-output-and-operational-layout):
-four user-readable result files are paired with a separate run manifest, complete
-C0 event evidence, and independent validation receipt. The removable
+five user-readable result files, including a selected-configuration minute
+trace, are paired with a separate run manifest, complete C0 event evidence,
+and independent validation receipt. The removable
 `phase3_archive` contains only superseded Phase 3 material and is not required
 by any current workflow. The Phase 2 matched summary and events now use
 `phase2_outputs/` and `phase2_operational/` respectively. See the US-3.34 removal proof and
 manual archival instructions.
-The original production notebook and compatibility modules were retired after
-full-matrix equivalence; historical artifacts and the recoverable checkpoint
-remain unchanged.
+The runner retains the Python modules as the single source of scientific and
+test logic; it does not duplicate them. Historical artifacts and the recoverable
+checkpoint remain unchanged.
 
 ## Phase 2 current workflow (US-2.16)
 

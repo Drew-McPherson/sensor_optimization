@@ -1924,7 +1924,7 @@ user-removable history:
 
 | Location | Contents |
 |---|---|
-| `artifacts/phase3_outputs/` | `phase3_results.csv`, `phase3_cluster_sizes.csv`, `phase3_snapshots.csv`, and `phase3_summary.json` |
+| `artifacts/phase3_outputs/` | `phase3_results.csv`, `phase3_cluster_sizes.csv`, `phase3_snapshots.csv`, `phase3_selected_trace.csv`, and `phase3_summary.json` |
 | `artifacts/phase3_operational/` | `phase3_run.json`, `phase3_equivalence_events.csv`, `phase3_validation.json`, plus preserved static references in `references/` |
 | `artifacts/phase3_archive/` | Superseded root-level Phase 3 artifacts and the original `phase3_current/` bundle; not used as current data |
 
@@ -1935,10 +1935,75 @@ independent receipt.
 `phase3_summary.json` is the schema-version-1 user-readable comparison summary.
 The schema-version-2 operational `phase3_run.json` owns in-progress/failure
 state, completion diagnostics, runtime equivalence, provenance, and hashes.
-It hashes the three result CSVs, summary, and C0 event file; the summary points
+It hashes the four result CSVs, summary, and C0 event file; the summary points
 to the paired operational receipt by relative path and SHA256. Every component
 must carry the same `run_id`. The manifest is written last, so a failed run
 cannot certify leftover tables.
+
+#### US-3.37 selected minute trace
+
+`phase3_selected_trace.csv` is the fifth user-facing output. It contains one
+row per input minute for C1, C2, clustered FMIC/SMIC alpha 0.10, and every
+tested-grid alpha tied at that method's minimum total-message count. A
+configuration selected for both alpha 0.10 and minimum messages occurs once,
+with both reasons. Minimum-message selections are exploratory and in-sample.
+C0 is not duplicated: the independently published
+`phase2_outputs/phase2_matched_trace.csv` is its matched reference under the
+existing C0 equivalence gate. It is not byte- or schema-identical to this
+Phase 3 trace; Phase 2 uses trigger/request/response/broadcast event categories,
+while Phase 3 distinguishes node triggers, cluster checks, coordinator
+escalations, and root-wide synchronization transmissions.
+
+The current selection produces six configurations and 119,904 rows (19,984
+minutes each); ties or a change in the tested-grid minimum change this count.
+The manifest's `outputs/phase3_selected_trace.csv` inventory entry is
+authoritative for schema version, ordered columns, selection scope, row count,
+unique-key fields, and exact-byte SHA-256. It records full precision by ordinary
+round-trip decimal serialization; formatting does not increase the precision
+of the input values. In the verified 2026-11-12 Run-All, the trace occupied
+163,626,312 bytes (about 156 MiB); production took 520.648 seconds and the
+saved-result/replay stage took 769.468 seconds. The complete workflow took
+1,290.579 seconds while reusing the current independent validation receipt.
+These are environment-specific stage times, not an isolated estimate of
+incremental trace overhead; the active artifact inventory records the run ID
+and exact hashes.
+
+Column order:
+
+```text
+run_id, config_id, algorithm, alpha_label, configuration_kind, selection_reasons,
+bucket_epoch, bucket_time_utc, initialization, observed_sensor_values,
+observed_global_average, p90_threshold, global_violated, entry_references,
+entry_known_state, entry_node_allowances, entry_coordinator_allowances,
+entry_partition, entry_coordinator_assignments, sensor_triggering_ids,
+cluster_checks, coordinator_check_count, coordinator_escalation_count,
+synchronized, synchronization_causes, exit_references, exit_known_state,
+exit_node_allowances, exit_coordinator_allowances, exit_partition,
+exit_coordinator_assignments, node_trigger_messages, cluster_check_requests,
+cluster_check_responses, coordinator_root_escalations, root_sync_requests,
+root_sync_responses, root_state_updates, total_messages, false_safe,
+false_violated
+```
+
+`bucket_epoch` is Unix seconds; timestamps are UTC ISO-8601 with an explicit
+UTC offset. Temperatures, averages, allowances, and deviations are degrees
+Celsius; counts are integer logical messages/checks/buckets, not bytes, energy,
+or latency. `global_violated`, `initialization`, `synchronized`, `false_safe`,
+and `false_violated` are boolean flags. Every collection cell is compact JSON
+with sorted object keys and deterministic sensor ordering. `null` means the
+state is unavailable (notably before initialization); empty collections are
+`[]` or `{}`, never null or zero. Entry state evaluates the current minute;
+checks and messages happen during it; exit state, including any synchronization,
+is carried into the next minute. The offline full-cohort oracle is for scoring
+only and does not affect protocol decisions or communication.
+
+The analysis loader exposes and validates the trace without producing or
+modifying it. Independent saved-result checks reconcile each selected
+configuration's bucket, message-category, trigger, check, escalation,
+synchronization, oracle, and false-safe/false-violated totals. Fresh-process
+replay checks bind every selected configuration (including tied minima) to
+the exact normalized trace content. The Run-All notebook backs up the new file
+with the other owned bundle outputs before replacement.
 
 The historical six-file bundle is mapped as follows: results, cluster sizes,
 and snapshots moved byte-for-byte into outputs; C0 events moved byte-for-byte
@@ -1990,3 +2055,38 @@ Phase 3 files physically unavailable, users may manually back up its contents
 elsewhere and remove the folder. The workflow never deletes it automatically.
 Phase 2's owned output and operational folders and Phase 1 inputs remain
 outside this cleanup.
+
+### US-3.36 One-click Phase 3 runner
+
+Open [`phase3_run.ipynb`](phase3_run.ipynb), select the project's Python
+environment as the kernel, then use **Restart Kernel and Run All**. The notebook
+uses the kernel's interpreter to orchestrate the existing Python modules; those
+modules remain the authoritative implementation and test sources.
+
+The default workflow:
+
+1. Validates the canonical Phase 1/Phase 2 inputs, receipts, and retained Phase 3
+   references, then checks the exact production-receipt contract.
+2. Preserves existing owned Phase 3 output and operational files in a unique
+   ignored recovery directory under
+   `artifacts/phase3_operational/runner_recovery/`.
+3. Reuses only a current, passing receipt; otherwise runs the full independent
+   validation command and verifies its receipt before production.
+4. Runs canonical production, then read-only saved-result/replay checks.
+
+The notebook shows stage starts and runtimes, saves full subprocess output as
+per-stage logs in the recovery directory, and displays each log's final lines.
+This keeps bulky test output out of saved notebook cells while leaving complete
+diagnostics available. It does not retry failed validation or production. A
+failure stops subsequent stages; an interruption leaves the per-run
+`runner_status.json` as `in_progress`, while failed subprocesses are recorded
+as `failed`. Check that record and the production manifest before restarting.
+Recovery copies and logs are not deleted by the workflow.
+
+The receipt certifies the current behavior/replay and cross-phase validation
+scope; the post-production saved/replay checks separately verify the produced
+bundle. The receipt and production provenance continue to bind the Python
+implementation, tests, configuration, inputs, and referenced evidence. The
+runner notebook is an orchestration front end, not a duplicate scientific or
+test source. The read-only [`phase3_analyze.ipynb`](phase3_analyze.ipynb)
+remains a separate step for charts and interpretation.

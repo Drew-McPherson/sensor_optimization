@@ -16,13 +16,15 @@ govern current requirements.
   matched summary reports 9,159 messages, 467 synchronizations, and passing
   sampled-state correctness. Its independent receipt records 49 passing tests.
 - **C0/C1/C2 controls and FMIC/SMIC:** implemented. The current Phase 3 run
-  (`2026-11-12T13:31:38.792440+00:00`) contains three controls and 38 clustered
-  configurations. Its independent receipt records 170 passing tests and is
-  hash-referenced by the summary. The read-only saved-results loader passed
-  against this run and its current inputs, configuration, outputs, and receipt.
+  (`2026-11-12T22:58:38.165659+00:00`) contains three controls and 38 clustered
+  configurations, plus a six-configuration, 119,904-row selected minute trace.
+  Its independent receipt records 175 passing tests and is hash-referenced by
+  the summary. The saved-results and fresh-process replay checks passed; the
+  three pre-existing result CSVs and C0 event CSV remain byte-identical to their
+  pre-trace recovery copies.
 - **Current reporting:** `scripts/phase3_analyze.ipynb` reads and analyzes saved
-  outputs only; the governing current interpretation is in §7.4. No production
-  rerun was performed for this documentation update.
+  outputs only; the governing current interpretation is in §7.4. The latest
+  Run-All workflow passed, reusing the current independent receipt.
 - **Not demonstrated / deferred:** the original eight-device multivariate POC,
   a separately measured event-level detection-delay distribution,
   out-of-sample threshold or alpha performance, intermittent-availability
@@ -45,15 +47,16 @@ data and run/validation records in `artifacts/phase1_operational/`; analysis
 remains saved/read-only. Historical artifact paths below are not current
 dependencies.
 
-**Execution architecture update (2026-11-11, US-3.32):** Phase 3 has exactly
-three maintained executable files: [`scripts/phase3_implement.py`](scripts/phase3_implement.py),
-[`scripts/phase3_test.py`](scripts/phase3_test.py), and
-[`scripts/phase3_analyze.ipynb`](scripts/phase3_analyze.ipynb). The implementation
-defaults to the revised C0/C1/C2 plus 38 clustered evaluations; tests are external
-and analysis reads saved results only. Notebook-only execution/tagged-cell
-loading requirements are superseded. The original notebook and compatibility
-modules are retired after full-matrix equivalence; historical scientific findings
-below remain historical. See [current commands and rollback](scripts/README_scripts.md#us-332-three-file-workflow-and-verified-cutover).
+**Execution architecture update (2026-11-12, US-3.36):** The
+[`scripts/phase3_run.ipynb`](scripts/phase3_run.ipynb) notebook orchestrates the
+current Phase 3 validation, production, and saved-result checks in one
+Run-All workflow. [`scripts/phase3_implement.py`](scripts/phase3_implement.py)
+and [`scripts/phase3_test.py`](scripts/phase3_test.py) remain the authoritative
+scientific and independent-test modules; the runner contains no duplicate logic.
+[`scripts/phase3_analyze.ipynb`](scripts/phase3_analyze.ipynb) remains separate
+and read-only. The implementation defaults to the revised C0/C1/C2 plus 38
+clustered evaluations. See the [current artifact layout and commands](scripts/README_scripts.md#us-334-phase-3-output-and-operational-layout)
+and [one-click workflow](scripts/README_scripts.md#us-336-one-click-phase-3-runner).
 
 This document has two layers:
 1. Discussion view for stakeholder alignment.
@@ -625,11 +628,11 @@ The following saved-results comparison is the current primary result. The
 matched Phase 2 and C0 totals and root synchronization count agree, and the
 current C0 equivalence evidence is checked per bucket, not inferred from equal
 totals alone. The read-only saved-results loader passed for the run recorded
-2026-11-12; the Phase 3 independent receipt records 170 passing tests, and the
-matched Phase 2 receipt records 49. The current Phase 3 result file contains
-three controls and all 38 FMIC/SMIC alpha rows; all report passed sampled-state
-correctness and zero false-safe/false-violated buckets. Each configuration
-records 1,999 globally violated sampled buckets.
+`2026-11-12T22:58:38.165659+00:00`; the Phase 3 independent receipt records
+175 passing tests; the matched Phase 2 receipt records 49. The current Phase 3
+result file contains three controls and all 38 FMIC/SMIC alpha rows; all report
+passed sampled-state correctness and zero false-safe/false-violated buckets.
+Each configuration records 1,999 globally violated sampled buckets.
 
 | Configuration | Messages | Root synchronizations (incl. initialization) | Change vs revised Phase 2/C0 (9,159) | Conditional change vs weighted singleton | Change vs centralized reference (119,904) |
 |---|---:|---:|---:|---:|---:|
@@ -902,19 +905,20 @@ No availability sensitivity or attribution run is required for Phase 3A. If Phas
 3. `scripts/phase3_implement.py` — import-safe Phase 3 algorithms, revised production, isolated runtime equivalence, and read-only replays.
 4. `scripts/phase3_test.py` — independent behavioral, saved-output, and fresh-process verification; Phase 1/2 suites remain independently owned dependencies.
 5. `scripts/phase3_analyze.ipynb` — existing saved-result analysis, inline charts, and Markdown interpretation, with no production execution.
+6. `scripts/phase3_run.ipynb` — one-click orchestration of current receipt validation/reuse, production, and saved-result/replay checks; it does not duplicate module logic.
 
 ### Data And Result Artifacts
 Current artifacts are intentionally compact:
 1. `artifacts/phase1_operational/phase1_aligned_temperature.csv`, its producer record and validation receipt;
 2. the Phase 3A experiment settings in `config/project_config.yaml` and derived preparation evidence;
 3. `artifacts/phase2_outputs/phase2_summary.json`, `artifacts/phase2_outputs/phase2_matched_trace.csv`, `artifacts/phase2_operational/phase2_events.csv`, and the separate Phase 2 validation receipt;
-4. `artifacts/phase3_outputs/phase3_results.csv`, `phase3_cluster_sizes.csv`, `phase3_snapshots.csv`, and `phase3_summary.json`;
+4. `artifacts/phase3_outputs/phase3_results.csv`, `phase3_cluster_sizes.csv`, `phase3_snapshots.csv`, `phase3_selected_trace.csv`, and `phase3_summary.json`;
 5. `artifacts/phase3_operational/phase3_run.json`, `phase3_equivalence_events.csv`, and the separate `phase3_validation.json`.
 
 The [artifact inventory](artifacts/README_artifacts.md) describes provenance,
 historical references, and the complete current layout.
 
-Detailed debug traces are optional and are not produced by default. Avoid duplicate summary files unless they provide a clear human-use case.
+The selected Phase 3 minute trace covers C1/C2, clustered alpha 0.10, and every tied in-sample minimum, not the full 41-configuration grid. Other detailed traces remain opt-in. Avoid duplicate summary files unless they provide a clear human-use case.
 
 ### Documentation
 1. This project plan for current requirements.
