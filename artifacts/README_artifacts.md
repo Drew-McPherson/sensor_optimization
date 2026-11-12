@@ -155,11 +155,24 @@ The current Phase 2 experiment is `phase3a_stable_cohort`, using sensors
 A/C/D/E/F/G and 19,984 consecutive one-minute buckets. The saved matched result
 records 9,159 transmissions, 467 synchronizations, and zero false-safe or
 false-violated root states. The current schema-versioned summary is
-`phase2_outputs/phase2_summary.json`; `phase2_operational/phase2_events.csv`
-contains event evidence, and `phase2_operational/phase2_validation.json` is the
-separately generated receipt. The receipt binds current source, tests, inputs,
-summary and events. Old paths are archived and are not fallbacks for current
-analysis or Phase 3. Phase 3 production was regenerated using its current receipt.
+`phase2_outputs/phase2_summary.json`; `phase2_outputs/phase2_matched_trace.csv`
+contains the full-precision trace for all 19,984 minute buckets;
+`phase2_operational/phase2_events.csv` contains the rounded
+completed-synchronization rows; and `phase2_operational/phase2_validation.json`
+is the separately generated receipt. The summary records the trace schema
+version, ordered columns, row count, relative path, and SHA-256 of exact bytes.
+The receipt binds current source, tests, inputs, summary, full trace, and events.
+The trace's entry fields describe state used for that minute, event fields
+describe actions during it, and exit fields describe state committed for the
+next minute. Blank cells represent missing values; CSV decimal formatting
+preserves the underlying full-precision values without adding precision. UTC
+timestamps are ISO-8601, epochs are Unix seconds, and temperatures, means,
+references, allowances, and deviations are in degrees Celsius; message counts
+are logical transmissions and state/trigger flags are integer indicators.
+This six-sensor two-sided matched trace is not interchangeable with the
+historical eight-sensor full-dataset signed-margin export and is not a Phase 3
+input. Old paths are archived and are not fallbacks for current analysis or
+Phase 3. Phase 3 production was regenerated using its current receipt.
 The read-only matched-results presentation and its strict saved-file/provenance
 checks are in [`../scripts/phase2_analyze.ipynb`](../scripts/phase2_analyze.ipynb).
 

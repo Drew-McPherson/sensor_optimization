@@ -371,14 +371,35 @@ The earlier `phase2_monitoring.py` and `phase2_artifacts.py` modules were merged
 into this engine; they are not current entry points.
 
 The schema-versioned `phase2_summary.json` links relatively to
-`phase2_events.csv` and `phase2_validation.json`. JSON is UTF-8 with indentation
-and a trailing newline; event CSV uses LF line endings. Publication replaces
-events before the summary, and the independent receipt binds the exact summary,
-events, shared engine, artifact code, tests, configuration and scientific inputs.
-Analysis and Phase 3 reject missing, failed, incomplete, stale or mixed evidence.
-The signed-margin reference remains separately owned by Phase 3 operational
-references and is not loaded from an archive. The superseded files are in `artifacts/phase2_archive/`; Phase 3 production
-was regenerated with a current independent receipt after the migration.
+`phase2_events.csv`, `phase2_matched_trace.csv`, and
+`phase2_validation.json`. The matched trace is a researcher-facing output with
+one full-precision row per minute and every field emitted by the shared engine.
+Its ordered columns and schema version, row count, relative path, and exact-byte
+SHA-256 are recorded in the summary. CSV uses UTF-8 and LF line endings, leaves
+missing values blank, and uses the default float serialization without explicit
+decimal rounding. The decimal text does not add precision beyond the underlying
+values. Entry fields are the state used to evaluate a bucket, event fields are
+actions during that bucket, and exit fields describe state carried to the next
+bucket. The offline oracle is for evaluation and does not influence distributed
+decisions or traffic.
+UTC timestamps use ISO-8601, bucket epochs are Unix seconds, and all
+temperatures, means, references, allowances, and deviations are in degrees
+Celsius. Message counts represent logical transmissions; state and trigger
+flags are integer indicators.
+
+The event CSV remains the compact completed-synchronization table with its
+existing schema and reporting precision. Publication atomically replaces
+events and trace before writing the linked summary last; an interrupted or
+mixed bundle fails hash validation. The independent receipt binds the exact
+summary, events, trace, shared engine, artifact code, tests, configuration and
+scientific inputs. It also reproduces all three production outputs in isolation
+without rewriting them. Analysis and Phase 3 reject missing, failed,
+incomplete, stale or mixed evidence. The matched trace is not a Phase 3 input
+and is distinct from the historical eight-sensor full-dataset signed-margin
+export. The signed-margin reference remains separately owned by Phase 3
+operational references and is not loaded from an archive. The superseded files
+are in `artifacts/phase2_archive/`; Phase 3 production was regenerated with a
+current independent receipt after the migration.
 
 For clean-kernel headless execution from PowerShell, use the same Python
 environment as the notebook kernel. Executed notebook copies go to the
@@ -467,22 +488,34 @@ complete finite readings. The threshold is read at round-trip precision from
 the `phase3a_stable_cohort` p90 statistics row and checked against the config;
 it is not embedded in the monitoring logic.
 
-The current contract uses three compact files:
+The current contract uses three published files and a separately owned receipt:
 
 - `artifacts/phase2_outputs/phase2_summary.json`: policy, experiment
   metadata, independent correctness counts, messages/categories, synchronization
-  counts, historical comparison, commands, limitations, and SHA-256 provenance.
+  counts, historical comparison, commands, limitations, SHA-256 provenance,
+  and the linked trace's schema, columns, row count and hash.
+- `artifacts/phase2_outputs/phase2_matched_trace.csv`: every matched minute and
+  all 82 state, observation, decision, event, oracle and communication fields.
+  Entry fields are evaluated for the current minute; event fields record its
+  actions; exit fields are carried into the next minute. UTC timestamps are
+  ISO-8601, epochs are Unix seconds, and temperatures, means, references,
+  allowances, and deviations are in degrees Celsius. Message counts are
+  logical transmissions and state/trigger flags are integer indicators. Values
+  are unrounded; empty CSV cells represent missing data.
 - `artifacts/phase2_operational/phase2_events.csv`: completed synchronization
   timestamps, causes, trigger IDs, entry/exit reference means and allowances,
   root/oracle states, and message counts. Numeric event details are displayed
   at four decimals; all decisions and correctness checks use unrounded inputs.
 - `artifacts/phase2_operational/phase2_validation.json`: independent test and
-  reproduction receipt, generated separately after publication.
+  reproduction receipt, generated separately after publication; it binds the
+  summary, full trace, events, current sources and tests.
 
-The matched event CSV explicitly uses LF (`\n`) line endings on every operating
-system (`lineterminator="\n"`), including its final newline. Its explicit column
-order, synchronization-row order, values, and numeric precision are unchanged.
-SHA-256 is calculated from the actual exported file, not reconstructed CSV text.
+Both CSV exports explicitly use LF (`\n`) line endings on every operating system
+(`lineterminator="\n"`), including a final newline, and SHA-256 is calculated
+from exact exported bytes. The event CSV's column order, synchronization-row
+order, values, and numeric precision are unchanged. The full trace is published
+from the same execution that produces the event CSV and uses the engine's full
+column order and default CSV float serialization.
 
 The historical `phase3a_phase2_baseline.json`, Phase 2 reports, Phase 3 code,
 FMIC/SMIC results, US-3.21 validation, and US-3.22 results/plots are protected

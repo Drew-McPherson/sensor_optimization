@@ -12,6 +12,40 @@ The untouched pre-normalization baseline (`US-0.01_original.md`) and entry-by-en
 
 ## 2026-11-12
 
+### Published the current matched Phase 2 full-precision trace (US-2.21)
+- **Context / trigger:** The matched workflow previously retained only synchronization rows, leaving researchers without the sensor, state, decision, and communication details for intervening minutes.
+- **Decision / change:** Published `phase2_matched_trace.csv` from the same production execution as the existing event CSV. Added trace schema/version, ordered columns, row count, relative path, and exact-byte SHA-256 to summary schema v2; updated the independent receipt to schema v2 and bind the trace. Extended isolated reproduction, fail-closed loading, regression coverage, the Phase 1 full-precision comparison, and Phase 2/Phase 3 documentation. The full trace is emitted unrounded; synchronization events retain their existing reporting precision.
+- **Rationale:** Gives the current six-sensor matched experiment a durable minute-level research output while preserving event-file compatibility, avoiding a second state machine, and keeping this matched two-sided trace distinct from historical full-dataset signed-margin outputs and Phase 3 experiment inputs.
+- **Outcome / impact:** Published 19,984 rows × 82 columns with trace SHA-256 `ba261267a7751c2b044408f88cfa789c57e881b8f7102039acfe178fe5e89aeb`. The event CSV remained byte-identical (SHA-256 `446d2e0b552ba603a0815e3275f5eba37513ac3298a63fb5129029dc3fba1d2e`); Phase 2 scientific metrics remained unchanged. Refreshed Phase 1/2/3 receipts and Phase 3 provenance; Phase 3 result, cluster-size, snapshot, and equivalence-event CSVs remained byte-identical. Phase 3 does not use the trace as an experiment input.
+- **Evidence / validation:** `python -B -m scripts.shared_monitoring_engine publish` and `python -B -m scripts.shared_monitoring_engine validate` passed; the independent Phase 2 receipt records 51 tests, no skips, failures, or errors. A separate full-precision rebuild matched every trace byte and column; selecting synchronization rows and applying the existing four-decimal export rule reproduced the event CSV bytes exactly. The Phase 2 implementation and test notebooks ran successfully in fresh `python3` kernels. `python -B -m scripts.phase3_test --record-validation artifacts\phase3_operational\phase3_validation.json` passed 172 tests with no skips; `python -B -m scripts.phase3_implement --validation-record artifacts\phase3_operational\phase3_validation.json` passed; `python -B -m scripts.phase3_test --checks saved replay --output-dir artifacts\phase3_outputs` passed all three checks. The Phase 1 test notebook passed 79 tests with no skips and verified the saved trace against its independent full-precision rebuild. Its declared `exhaustive_raw_duplicate_audit` remains not run.
+- **Affected files / artifacts:** `scripts/shared_monitoring_engine.py`, `scripts/test_shared_monitoring.py`, `scripts/phase1_test.ipynb`, `scripts/phase2_implement.ipynb`, `scripts/phase2_test.ipynb`, `scripts/README_scripts.md`, `artifacts/README_artifacts.md`, `Distributed_Monitoring_POC_Project_Plan.md`, `artifacts/phase2_outputs/phase2_matched_trace.csv`, `artifacts/phase2_outputs/phase2_summary.json`, `artifacts/phase2_operational/phase2_events.csv`, `artifacts/phase2_operational/phase2_validation.json`, `artifacts/phase1_operational/phase1_validation.json`, `artifacts/phase3_outputs/phase3_summary.json`, `artifacts/phase3_operational/phase3_run.json`, `artifacts/phase3_operational/phase3_validation.json`, `CHANGELOG.md`.
+- **Related work:** US-2.15 through US-2.20; US-2.21.
+
+### Planned the current matched Phase 2 trace export (US-2.21)
+- **Context / trigger:** The current matched workflow saves synchronization events but not the complete minute-by-minute sensor activity trace requested for research.
+- **Decision / change:** Added a user story for publishing the existing full-precision matched trace with linked provenance, independent validation, regression coverage, and documentation.
+- **Rationale:** Restores minute-level visibility for the current experiment while distinguishing it from the historical full-dataset, signed-margin export and preserving existing scientific behavior.
+- **Outcome / impact:** Planning only; no monitoring code, configuration, generated artifacts, receipts, or scientific results were changed.
+- **Evidence / validation:** Reviewed the current trace construction and publication path, existing artifact contract, and historical consolidation records; no runtime validation was run for this documentation-only change.
+- **Affected files / artifacts:** `User Stories/US-2.21.md`, `CHANGELOG.md`.
+- **Related work:** US-2.15 through US-2.19; US-2.20.
+
+### Restrict default agent access to archived artifacts
+- **Context / trigger:** Ignoring archive folders in Git does not by itself tell agents not to inspect their contents.
+- **Decision / change:** Added a repository instruction that treats the Phase 1, Phase 2, and Phase 3 archive folders as out of scope unless the user explicitly authorizes access for the current task.
+- **Rationale:** Separates Git tracking behavior from agent workflow and makes the intended opt-in boundary explicit.
+- **Outcome / impact:** Agents are instructed not to list, search, open, read, parse, cite, or otherwise use files in these folders by default; they should ask before access if contents appear necessary.
+- **Evidence / validation:** Reviewed the instruction against the requested folders; `git diff --check` passed.
+- **Affected files / artifacts:** `AGENTS.md`, `CHANGELOG.md`.
+
+### Ignore archived Phase 1, Phase 2, and Phase 3 artifacts
+- **Context / trigger:** The three phase archive folders should not be tracked as repository source.
+- **Decision / change:** Added `artifacts/phase2_archive/` to `.gitignore` and grouped it with the existing Phase 1 and Phase 3 archive patterns.
+- **Rationale:** Keeps archived generated outputs out of Git while preserving the existing archive-ignore behavior for Phases 1 and 3.
+- **Outcome / impact:** Git ignores `artifacts/phase1_archive/`, `artifacts/phase2_archive/`, and `artifacts/phase3_archive/`; no files were deleted or changed inside those folders.
+- **Evidence / validation:** `git check-ignore -v` matched all three archive paths to `.gitignore`; `git diff --check` passed.
+- **Affected files / artifacts:** `.gitignore`, `CHANGELOG.md`.
+
 ### Documented the matched Phase 2 notebooks and shared engine (US-2.20)
 - **Context / trigger:** The maintained Phase 2 notebooks and shared engine needed self-contained descriptions of the matched cohort, threshold derivation, state machine, publication effects, validation receipt, and source-freshness contract. Editing the shared engine also changes a hash consumed by Phase 1, Phase 2, and Phase 3 evidence.
 - **Decision / change:** Expanded the implementation and test notebook Markdown/comments, documented `sha256(path)`, added a module overview and useful docstrings to all 31 engine functions and five nested helpers, and clarified state transitions, offline correctness, message accounting, isolated reproduction, receipt behavior, and CLI defaults. No executable statements, signatures, test definitions, configuration, or monitoring logic changed.

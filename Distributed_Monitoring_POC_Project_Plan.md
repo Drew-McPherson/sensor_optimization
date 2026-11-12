@@ -401,13 +401,19 @@ For each exported row:
 8. Validation checks the full unrounded trace and saved evidence against the original observations; decisions use unrounded inputs. The compact published event CSV is not the complete trace.
 
 ### 6.6 Required Phase 2 Output Schema
-The current matched workflow publishes compact synchronization events in
-`artifacts/phase2_operational/phase2_events.csv`, a schema-versioned
-`artifacts/phase2_outputs/phase2_summary.json`, and an independent receipt.
-The event CSV contains timestamps, causes, triggering sensors, entry and exit
-global references and allowances, root/oracle states, and the trigger,
-request, response, broadcast, and total message counts. The full per-bucket
-trace is validated independently and is not the published event schema. See
+The current matched workflow publishes a full-precision per-bucket
+`artifacts/phase2_outputs/phase2_matched_trace.csv`, compact synchronization
+events in `artifacts/phase2_operational/phase2_events.csv`, a schema-versioned
+`artifacts/phase2_outputs/phase2_summary.json`, and an independent receipt. The
+summary links the trace by relative path, schema version, ordered columns, row
+count, and SHA-256 of exact file bytes. The event CSV retains its existing
+timestamps, causes, triggering sensors, entry and exit global references and
+allowances, root/oracle states, and trigger, request, response, broadcast, and
+total message counts. The trace records entry state used for the current minute,
+its observed values and events, and exit state carried into the next minute;
+the offline oracle is for evaluation and never influences distributed
+decisions or traffic. The matched trace is not a Phase 3 input and is distinct
+from the historical full-dataset signed-margin export. See
 [Phase 2 output details](scripts/README_scripts.md#us-216-matched-phase-2-notebooks).
 
 Implementation precedence rule for `event_resync_reason` when more than one cause is possible in the same row:
@@ -435,6 +441,7 @@ No alternate monitoring state machine is required.
 The historical full-data `phase2_temperature_sensors.csv` and archived general-
 dataset notebook are not the current matched Phase 2 evidence. The active
 matched evidence is `artifacts/phase2_outputs/phase2_summary.json`,
+`artifacts/phase2_outputs/phase2_matched_trace.csv`,
 `artifacts/phase2_operational/phase2_events.csv`, and its independent
 `artifacts/phase2_operational/phase2_validation.json` receipt.
 
@@ -900,7 +907,7 @@ No availability sensitivity or attribution run is required for Phase 3A. If Phas
 Current artifacts are intentionally compact:
 1. `artifacts/phase1_operational/phase1_aligned_temperature.csv`, its producer record and validation receipt;
 2. the Phase 3A experiment settings in `config/project_config.yaml` and derived preparation evidence;
-3. `artifacts/phase2_outputs/phase2_summary.json`, `artifacts/phase2_operational/phase2_events.csv`, and the separate Phase 2 validation receipt;
+3. `artifacts/phase2_outputs/phase2_summary.json`, `artifacts/phase2_outputs/phase2_matched_trace.csv`, `artifacts/phase2_operational/phase2_events.csv`, and the separate Phase 2 validation receipt;
 4. `artifacts/phase3_outputs/phase3_results.csv`, `phase3_cluster_sizes.csv`, `phase3_snapshots.csv`, and `phase3_summary.json`;
 5. `artifacts/phase3_operational/phase3_run.json`, `phase3_equivalence_events.csv`, and the separate `phase3_validation.json`.
 

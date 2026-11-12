@@ -9,6 +9,16 @@ configuration file. Keep dependency and tool manifests (such as
 `requirements.txt`) separate. If a distinct project configuration file appears
 necessary, explain the constraint and get user approval before adding it.
 
+## Archived artifact access
+
+Treat `artifacts/phase1_archive/`, `artifacts/phase2_archive/`, and
+`artifacts/phase3_archive/` as out of scope by default. Do not list, search,
+open, read, parse, cite, or otherwise use files in these folders unless the
+user explicitly instructs you to inspect or use the relevant archive folder or
+files for the current task. If archive contents seem necessary but the user has
+not explicitly authorized access, ask before accessing them. The `.gitignore`
+rules control Git tracking; this instruction separately controls agent access.
+
 ## Mandatory Change Logging
 
 For every requested change that modifies code, notebooks, scripts, configuration, or documentation, update `CHANGELOG.md` in the same task using this format:

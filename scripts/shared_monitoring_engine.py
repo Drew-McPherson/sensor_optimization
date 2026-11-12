@@ -17,8 +17,9 @@ The reusable trace also supports changing sensor availability, although the
 matched production experiment requires all six readings at every bucket. An
 offline oracle evaluates the observed mean at each bucket to compare with the
 root's last-known state; that truth is not supplied to the root's decisions.
-Production artifacts contain a compact summary and completed-synchronization
-events rather than the full per-minute trace.
+Production artifacts contain a full-precision per-minute trace, a compact
+summary, and a rounded completed-synchronization event table. The trace is
+research output, not a Phase 3 experiment input.
 
 ``publish`` writes the canonical Phase 2 events and linked summary;
 ``validate`` runs shared regressions and isolated reproduction before writing
@@ -820,14 +821,16 @@ def _sha256(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
+def _run_phase3a_two_sided(
+    root: Path, output_dir: Path | None = None
+) -> tuple[dict, pd.DataFrame]:
     """Run and validate only the locked six-sensor matched Phase 2 experiment.
 
-    The wrapper checks the approved population, interval, preparation evidence,
+    The runner checks the approved population, interval, preparation evidence,
     aligned Phase 1 input, and historical baseline before building the full
     trace, sampled-state oracle, and transmission totals. It returns a compact
-    summary and writes completed-synchronization events plus a summary to the
-    selected destination. The historical comparison is a reference, not the
+    summary and the same full-precision trace used to serialize rounded
+    completed-synchronization events and the candidate summary. The historical comparison is a reference, not the
     current policy. An explicit ``output_dir`` must be isolated from sources,
     historical references, and owned production-artifact trees; it is intended
     for candidate reproduction, not canonical publication.
@@ -938,7 +941,7 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
     if selected[sensors].isna().any().any():
         raise ValueError("Matched Phase 3A sensor observations must be complete; no imputation.")
     selected = selected.reset_index(drop=True)
-    trace = build_phase2_trace(selected, sensors, threshold)
+    trace = build_phase2_trace(selected, sensors, threshold, round_output=False)
     correctness = root_correctness_summary(trace)
     if correctness["correctness_status"] != "passed":
         raise ValueError(f"Two-sided Phase 2 correctness gate failed: {correctness}")
@@ -963,7 +966,7 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
         "entry_root_allowance", "exit_root_allowance_if_resync", "root_known_state",
         "oracle_global_state", *categories, "total_message_count",
     ]
-    events = trace.loc[trace["event_resync_performed"].eq(1), event_columns]
+    events = trace.loc[trace["event_resync_performed"].eq(1), event_columns].round(4)
     destination.mkdir(parents=True, exist_ok=True)
     events.to_csv(events_path, index=False, lineterminator="\n")
     synchronizations = int(trace["event_resync_performed"].sum())
@@ -1029,6 +1032,16 @@ def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
         if _sha256(root / relative) != digest:
             raise RuntimeError(f"Protected input or historical output changed during execution: {relative}")
     output_path.write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    return summary, trace
+
+
+def run_phase3a_two_sided(root: Path, output_dir: Path | None = None) -> dict:
+    """Run the locked matched experiment and return its compact summary.
+
+    The internal runner builds and validates the full trace in the same
+    execution; this public wrapper preserves the existing summary-only API.
+    """
+    summary, _ = _run_phase3a_two_sided(root, output_dir)
     return summary
 
 
@@ -1214,8 +1227,12 @@ def check_trace_invariants(
 
 
 SUMMARY = Path("artifacts/phase2_outputs/phase2_summary.json")
+TRACE = Path("artifacts/phase2_outputs/phase2_matched_trace.csv")
 EVENTS = Path("artifacts/phase2_operational/phase2_events.csv")
 RECEIPT = Path("artifacts/phase2_operational/phase2_validation.json")
+SUMMARY_SCHEMA_VERSION = 2
+TRACE_SCHEMA_VERSION = 1
+RECEIPT_SCHEMA_VERSION = 2
 SOURCES = (
     "scripts/shared_monitoring_engine.py",
     "scripts/test_shared_monitoring.py",
@@ -1237,7 +1254,7 @@ def _write_atomic(path: Path, data: bytes) -> None:
     """Replace one file atomically after flushing a same-directory temporary.
 
     The temporary file is cleaned up on success or failure. Separate calls for
-    the events and summary are not a multi-file transaction, so linked hashes
+    events, trace, and summary are not a multi-file transaction, so linked hashes
     and validation detect an interrupted or mixed publication.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1263,6 +1280,13 @@ def _json_bytes(value: dict) -> bytes:
     return (json.dumps(value, indent=2, allow_nan=False) + "\n").encode("utf-8")
 
 
+def _trace_csv_bytes(trace: pd.DataFrame) -> bytes:
+    """Serialize the full-precision trace with stable UTF-8/LF CSV settings."""
+    return trace.to_csv(
+        index=False, lineterminator="\n", na_rep=""
+    ).encode("utf-8")
+
+
 def _source_hashes(root: Path) -> dict[str, str]:
     """Hash exactly the repository-relative files named by ``SOURCES``.
 
@@ -1284,8 +1308,9 @@ def _protected_hashes(root: Path) -> dict[str, str]:
     """Snapshot selected Phase 2/3 artifact trees before validation work.
 
     The returned relative-path hashes let the validator detect unexpected
-    changes to Phase 3 outputs/operations and protected Phase 2 archive/current
-    evidence. The inventory is limited to these named trees.
+    changes to current Phase 2 summary/trace/events, Phase 3 outputs/operations,
+    and protected Phase 2 archive/current evidence. The inventory is limited to
+    these named artifacts and trees.
     """
     artifacts = root / "artifacts"
     files = set()
@@ -1293,45 +1318,91 @@ def _protected_hashes(root: Path) -> dict[str, str]:
         directory = artifacts / folder
         if directory.is_dir():
             files.update(path for path in directory.rglob("*") if path.is_file())
+    for relative in (SUMMARY, TRACE, EVENTS):
+        path = root / relative
+        if path.is_file():
+            files.add(path)
     return {str(path.relative_to(root)): _hash(path) for path in sorted(files)}
 
 
-def _generate(root: Path) -> tuple[dict, bytes]:
-    """Generate an isolated candidate summary and completed-event bytes.
+def _generate(root: Path) -> tuple[dict, bytes, bytes]:
+    """Generate an isolated candidate summary, events, and full trace.
 
     The candidate writer runs in a temporary directory, so canonical Phase 2
     outputs are not replaced. The summary is adapted to the production artifact
-    links and current source identity; the tuple is used for publication or
-    byte-for-byte reproduction checks.
+    links and current source identity; all returned bytes are used for
+    publication or byte-for-byte reproduction checks.
     """
     with tempfile.TemporaryDirectory(prefix="phase2_candidate_") as temporary:
         directory = Path(temporary) / "run"
-        summary = run_phase3a_two_sided(root, directory)
+        summary, trace = _run_phase3a_two_sided(root, directory)
         events = (directory / "phase3a_phase2_two_sided_events.csv").read_bytes()
-    summary["schema_version"] = 1
+        trace_bytes = _trace_csv_bytes(trace)
+    summary["schema_version"] = SUMMARY_SCHEMA_VERSION
     summary["events_artifact"] = "../phase2_operational/phase2_events.csv"
     summary["validation_artifact"] = "../phase2_operational/phase2_validation.json"
+    summary["trace_schema_version"] = TRACE_SCHEMA_VERSION
+    summary["trace_artifact"] = "phase2_matched_trace.csv"
+    summary["trace_row_count"] = len(trace)
+    summary["trace_columns"] = list(trace.columns)
+    summary["trace_sha256"] = hashlib.sha256(trace_bytes).hexdigest()
     summary["provenance"].pop("protected_artifact_sha256_before_and_after")
     summary["provenance"]["artifact_writer_sha256"] = _hash(root / "scripts" / "shared_monitoring_engine.py")
     summary["validation_commands"] = [
         "python -B -m scripts.shared_monitoring_engine validate",
     ]
-    return summary, events
+    return summary, events, trace_bytes
 
 
 def publish(root: Path) -> dict:
-    """Run the matched experiment and publish events, then their linked summary.
+    """Run the matched experiment and publish trace, events, and linked summary.
 
     This is a production writer, not a read-only calculation. Each artifact is
-    replaced atomically in sequence, with the event CSV written first and its
-    digest embedded in the summary written second. It does not create or refresh
-    the separate independent validation receipt.
+    replaced atomically in sequence; the summary is written last and binds the
+    exact trace and event bytes. It does not create or refresh the separate
+    independent validation receipt.
     """
     root = root.resolve()
-    summary, events = _generate(root)
+    summary, events, trace = _generate(root)
     _write_atomic(_owned_path(root, EVENTS), events)
+    _write_atomic(_owned_path(root, TRACE), trace)
     _write_atomic(_owned_path(root, SUMMARY), _json_bytes(summary))
     return summary
+
+
+def _validate_trace_artifact(path: Path, summary: dict) -> None:
+    """Check the trace's linked version, exact bytes, column order, and rows."""
+    row_count = summary.get("trace_row_count")
+    columns = summary.get("trace_columns")
+    if (
+        summary.get("trace_schema_version") != TRACE_SCHEMA_VERSION
+        or isinstance(summary.get("trace_schema_version"), bool)
+        or summary.get("trace_artifact") != TRACE.name
+        or not isinstance(row_count, int)
+        or isinstance(row_count, bool)
+        or row_count <= 0
+        or row_count != summary.get("bucket_count")
+        or not isinstance(columns, list)
+        or not columns
+        or any(not isinstance(column, str) for column in columns)
+        or len(set(columns)) != len(columns)
+        or summary.get("trace_sha256") != _hash(path)
+    ):
+        raise ValueError("Phase 2 trace schema, link, row count, or hash is invalid.")
+    try:
+        with path.open(encoding="utf-8", newline="") as stream:
+            reader = csv.reader(stream)
+            if next(reader, None) != columns:
+                raise ValueError("Phase 2 trace columns do not match the summary schema.")
+            actual_rows = 0
+            for row in reader:
+                if len(row) != len(columns):
+                    raise ValueError("Phase 2 trace row width does not match its schema.")
+                actual_rows += 1
+    except (csv.Error, UnicodeDecodeError) as error:
+        raise ValueError("Phase 2 trace CSV is malformed or is not UTF-8.") from error
+    if actual_rows != row_count:
+        raise ValueError("Phase 2 trace row count does not match the summary.")
 
 
 def load_validated(root: Path) -> dict:
@@ -1343,21 +1414,24 @@ def load_validated(root: Path) -> dict:
     evidence raises an error; this function does not regenerate outputs.
     """
     root = root.resolve()
-    summary_path, events_path, receipt_path = (_owned_path(root, p) for p in (SUMMARY, EVENTS, RECEIPT))
-    for path in (summary_path, events_path, receipt_path):
+    summary_path, trace_path, events_path, receipt_path = (
+        _owned_path(root, p) for p in (SUMMARY, TRACE, EVENTS, RECEIPT)
+    )
+    for path in (summary_path, trace_path, events_path, receipt_path):
         if not path.is_file():
             raise FileNotFoundError(f"Required current Phase 2 artifact is missing: {path}")
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     if (
-        summary.get("schema_version") != 1
+        summary.get("schema_version") != SUMMARY_SCHEMA_VERSION
         or summary.get("events_artifact") != "../phase2_operational/phase2_events.csv"
         or summary.get("validation_artifact") != "../phase2_operational/phase2_validation.json"
         or summary.get("events_sha256") != _hash(events_path)
     ):
         raise ValueError("Phase 2 summary schema, event link, or event hash is invalid.")
+    _validate_trace_artifact(trace_path, summary)
     if (
-        receipt.get("schema_version") != 1
+        receipt.get("schema_version") != RECEIPT_SCHEMA_VERSION
         or receipt.get("status") != "passed"
         or receipt.get("checks") != ["unit_tests", "isolated_reproduction"]
         or not isinstance(receipt.get("test_count"), int)
@@ -1368,6 +1442,7 @@ def load_validated(root: Path) -> dict:
         or receipt.get("errors") != []
         or receipt.get("summary_sha256") != _hash(summary_path)
         or receipt.get("events_sha256") != _hash(events_path)
+        or receipt.get("trace_sha256") != _hash(trace_path)
         or receipt.get("source_sha256") != _source_hashes(root)
     ):
         raise ValueError("Phase 2 independent validation receipt is failed, incomplete, or stale.")
@@ -1387,11 +1462,17 @@ def validate(root: Path) -> dict:
     """
     root = root.resolve()
     receipt_path = _owned_path(root, RECEIPT)
-    _write_atomic(receipt_path, _json_bytes({"schema_version": 1, "status": "in_progress"}))
+    _write_atomic(receipt_path, _json_bytes({
+        "schema_version": RECEIPT_SCHEMA_VERSION, "status": "in_progress",
+    }))
     before = _source_hashes(root)
     protected_before = _protected_hashes(root)
-    summary_path, events_path = _owned_path(root, SUMMARY), _owned_path(root, EVENTS)
-    summary_hash, events_hash = _hash(summary_path), _hash(events_path)
+    summary_path, trace_path, events_path = (
+        _owned_path(root, p) for p in (SUMMARY, TRACE, EVENTS)
+    )
+    summary_hash, trace_hash, events_hash = (
+        _hash(summary_path), _hash(trace_path), _hash(events_path)
+    )
     suite = unittest.defaultTestLoader.loadTestsFromNames(
         ["scripts.test_shared_monitoring"]
     )
@@ -1400,17 +1481,23 @@ def validate(root: Path) -> dict:
     print(stream.getvalue(), end="")
     if not result.wasSuccessful() or result.skipped or result.testsRun <= 0:
         raise RuntimeError("Phase 2 regression suite failed, skipped tests, or ran no tests.")
-    expected, fresh_events = _generate(root)
+    expected, fresh_events, fresh_trace = _generate(root)
     saved = json.loads(summary_path.read_text(encoding="utf-8"))
-    if saved != expected or fresh_events != events_path.read_bytes():
+    if (
+        saved != expected
+        or fresh_events != events_path.read_bytes()
+        or fresh_trace != trace_path.read_bytes()
+    ):
         raise ValueError("Saved Phase 2 result differs from the isolated reproduction.")
     if (
         before != _source_hashes(root) or protected_before != _protected_hashes(root)
-        or summary_hash != _hash(summary_path) or events_hash != _hash(events_path)
+        or summary_hash != _hash(summary_path)
+        or trace_hash != _hash(trace_path)
+        or events_hash != _hash(events_path)
     ):
         raise RuntimeError("Phase 2 inputs, source, or saved artifacts changed during validation.")
     receipt = {
-        "schema_version": 1,
+        "schema_version": RECEIPT_SCHEMA_VERSION,
         "status": "passed",
         "checks": ["unit_tests", "isolated_reproduction"],
         "test_count": result.testsRun,
@@ -1419,6 +1506,7 @@ def validate(root: Path) -> dict:
         "errors": [],
         "summary_sha256": summary_hash,
         "events_sha256": events_hash,
+        "trace_sha256": trace_hash,
         "source_sha256": before,
     }
     _write_atomic(receipt_path, _json_bytes(receipt))

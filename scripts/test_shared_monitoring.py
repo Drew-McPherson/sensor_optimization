@@ -225,7 +225,7 @@ class Phase3AStatisticsTests(unittest.TestCase):
 
 
 class ArtifactContractTests(unittest.TestCase):
-    """Verify publication receipts, source identity, and import-safe behavior."""
+    """Verify linked publication receipts, source identity, and import safety."""
 
     def setUp(self):
         """Create an isolated synthetic repository for artifact-contract checks."""
@@ -237,9 +237,14 @@ class ArtifactContractTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(name.encode())
         self.summary = {
-            "schema_version": 1,
+            "schema_version": contract.SUMMARY_SCHEMA_VERSION,
+            "bucket_count": 1,
             "events_artifact": "../phase2_operational/phase2_events.csv",
             "validation_artifact": "../phase2_operational/phase2_validation.json",
+            "trace_schema_version": contract.TRACE_SCHEMA_VERSION,
+            "trace_artifact": contract.TRACE.name,
+            "trace_row_count": 1,
+            "trace_columns": ["bucket_epoch"],
             "monitoring_preparation": {"fixture": "independent contract test"},
         }
         preparation_mock = mock.patch.object(
@@ -248,16 +253,21 @@ class ArtifactContractTests(unittest.TestCase):
         preparation_mock.start()
         self.addCleanup(preparation_mock.stop)
         self.events = b"event\n1\n"
+        self.trace = b"bucket_epoch\n1\n"
         import hashlib
         self.summary["events_sha256"] = hashlib.sha256(self.events).hexdigest()
-        with mock.patch.object(contract, "_generate", return_value=(self.summary, self.events)):
+        self.summary["trace_sha256"] = hashlib.sha256(self.trace).hexdigest()
+        with mock.patch.object(
+            contract, "_generate", return_value=(self.summary, self.events, self.trace),
+        ):
             contract.publish(self.root)
         self.receipt = {
-            "schema_version": 1, "status": "passed",
+            "schema_version": contract.RECEIPT_SCHEMA_VERSION, "status": "passed",
             "checks": ["unit_tests", "isolated_reproduction"], "test_count": 1,
             "skipped": [], "failures": [], "errors": [],
             "summary_sha256": contract._hash(self.root / contract.SUMMARY),
             "events_sha256": contract._hash(self.root / contract.EVENTS),
+            "trace_sha256": contract._hash(self.root / contract.TRACE),
             "source_sha256": contract._source_hashes(self.root),
         }
         self.write_receipt()
@@ -280,7 +290,10 @@ class ArtifactContractTests(unittest.TestCase):
 
     def test_changed_evidence_is_rejected(self):
         """Detect changed source or artifact bytes after receipt creation."""
-        for relative in (contract.SUMMARY, contract.EVENTS, *map(Path, contract.SOURCES)):
+        for relative in (
+            contract.SUMMARY, contract.TRACE, contract.EVENTS,
+            *map(Path, contract.SOURCES),
+        ):
             path = self.root / relative
             original = path.read_bytes()
             with self.subTest(path=relative):
@@ -290,11 +303,50 @@ class ArtifactContractTests(unittest.TestCase):
                 path.write_bytes(original)
 
     def test_partial_or_mixed_runs_are_rejected(self):
-        """Reject incomplete evidence bundles and artifacts from mixed run IDs."""
-        self.summary["events_sha256"] = "0" * 64
+        """Reject trace/hash mismatch even when receipt binds the changed summary."""
+        self.summary["trace_sha256"] = "0" * 64
         (self.root / contract.SUMMARY).write_bytes(contract._json_bytes(self.summary))
         self.receipt["summary_sha256"] = contract._hash(self.root / contract.SUMMARY)
         self.write_receipt()
+        with self.assertRaises(ValueError):
+            contract.load_validated(self.root)
+
+    def test_trace_is_required_and_schema_row_count_must_match(self):
+        """Reject missing traces and linked trace row/schema inconsistencies."""
+        trace_path = self.root / contract.TRACE
+        trace_path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            contract.load_validated(self.root)
+        trace_path.write_bytes(self.trace)
+        self.summary["trace_row_count"] = 2
+        (self.root / contract.SUMMARY).write_bytes(contract._json_bytes(self.summary))
+        self.receipt["summary_sha256"] = contract._hash(self.root / contract.SUMMARY)
+        self.write_receipt()
+        with self.assertRaises(ValueError):
+            contract.load_validated(self.root)
+
+    def test_interrupted_publication_is_not_accepted(self):
+        """Reject a new event file paired with the previous summary and trace."""
+        new_events = b"event\n2\n"
+        new_trace = b"bucket_epoch\n2\n"
+        self.summary["events_sha256"] = hashlib.sha256(new_events).hexdigest()
+        self.summary["trace_sha256"] = hashlib.sha256(new_trace).hexdigest()
+        original_write = contract._write_atomic
+
+        def fail_before_trace(path, data):
+            if path == self.root / contract.TRACE:
+                raise OSError("simulated trace publication interruption")
+            original_write(path, data)
+
+        with (
+            mock.patch.object(
+                contract, "_generate",
+                return_value=(self.summary, new_events, new_trace),
+            ),
+            mock.patch.object(contract, "_write_atomic", side_effect=fail_before_trace),
+        ):
+            with self.assertRaisesRegex(OSError, "interruption"):
+                contract.publish(self.root)
         with self.assertRaises(ValueError):
             contract.load_validated(self.root)
 
@@ -873,7 +925,7 @@ class MatchedProductionTests(unittest.TestCase):
                 with self.subTest(run=name):
                     root = Path(directory) / name
                     root.mkdir()
-                    _, _, protected = self.create_matched_fixture(root)
+                    config, frame, protected = self.create_matched_fixture(root)
                     completed = subprocess.run(
                         [sys.executable, "-B", "-m", "scripts.shared_monitoring_engine", "--root", str(root),
                          "--output-dir", str(root / "isolated")],
@@ -899,6 +951,38 @@ class MatchedProductionTests(unittest.TestCase):
                     )
                     digest = hashlib.sha256(event_bytes).hexdigest()
                     self.assertEqual(summary["events_sha256"], digest)
+                    trace = build_phase2_trace(
+                        frame,
+                        [f"{sensor}_temperature" for sensor in config["selected_sensor_ids"]],
+                        summary["threshold_value"],
+                        round_output=False,
+                    )
+                    trace_bytes = contract._trace_csv_bytes(trace)
+                    trace_frame = pd.read_csv(
+                        io.BytesIO(trace_bytes), float_precision="round_trip", low_memory=False,
+                    )
+                    self.assertEqual(trace_frame.shape, (19984, 82))
+                    self.assertEqual(trace_frame.columns.tolist(), list(trace.columns))
+                    self.assertEqual(
+                        trace.loc[trace["event_resync_performed"].eq(1), [
+                            "bucket_epoch", "bucket_time_utc", "event_resync_causes",
+                            "event_triggering_sensor_names", "entry_xbar_t0",
+                            "exit_xbar_t0_if_resync", "entry_root_allowance",
+                            "exit_root_allowance_if_resync", "root_known_state",
+                            "oracle_global_state", "trigger_message_count",
+                            "request_message_count", "response_message_count",
+                            "broadcast_message_count", "total_message_count",
+                        ]].round(4).to_csv(index=False, lineterminator="\n").encode("utf-8"),
+                        event_bytes,
+                    )
+                    self.assertEqual(
+                        int(trace_frame["event_resync_performed"].sum()),
+                        summary["resynchronization_count"],
+                    )
+                    self.assertEqual(
+                        int(trace_frame["event_resync_performed"].sum()),
+                        summary["resynchronization_count"],
+                    )
                     self.assertEqual(summary["bucket_count"], 19984)
                     self.assertEqual(summary["selected_sensor_ids"], list("ACDEFG"))
                     self.assertEqual(
@@ -931,7 +1015,7 @@ class MatchedProductionTests(unittest.TestCase):
                             ],
                             hashlib.sha256(content).hexdigest(),
                         )
-                    outputs.append((summary_bytes, summary, event_bytes, digest))
+                    outputs.append((summary_bytes, summary, event_bytes, digest, trace_bytes))
             self.assertEqual(outputs[0], outputs[1])
 
     def test_separate_current_outputs_preserve_originals_without_a_phase3_notebook(self):
