@@ -32,10 +32,12 @@ from scripts.shared_monitoring_engine import (
     RECEIPT as PHASE2_RECEIPT,
     SUMMARY as PHASE2_SUMMARY,
     build_phase2_trace,
+    load_phase3a_config,
     load_validated as load_validated_phase2,
     prepare_monitoring,
     historical_input_matches,
     preparation_fingerprint,
+    PROJECT_CONFIG_PATH,
     validate_preparation_policy,
     root_correctness_summary,
 )
@@ -336,7 +338,7 @@ PHASE3A_BUCKET_SECONDS = 60
 def validate_phase3a_config(config):
     """Reject configuration drift from the approved stable-cohort contract."""
     if not isinstance(config, dict):
-        raise ValueError("Phase 3A experiment configuration must be a JSON object.")
+        raise ValueError("Phase 3A experiment configuration must be a mapping.")
     if config.get("input_source") != "artifacts/phase1_operational/phase1_aligned_temperature.csv":
         raise ValueError("Phase 3A input must use the aligned Phase 1 artifact.")
 
@@ -984,8 +986,8 @@ def run_phase3a_smic(
 
 
 def load_phase3a_monitoring_inputs(root: Path) -> dict:
-    config_path = root / "config" / "phase3a_experiment_config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config_path = root / PROJECT_CONFIG_PATH
+    config = load_phase3a_config(root)
     sensors, _, _, _, _ = validate_phase3a_config(config)
     threshold_config = config["threshold"]
     preparation = prepare_monitoring(root)
@@ -2137,8 +2139,8 @@ def _relative_artifact_path(source_directory: Path, target: Path) -> str:
 def _validate_contract(root: Path):
     artifacts = root / "artifacts"
     reference_directory = _phase3_reference_directory(root)
-    config_path = root / "config" / "phase3a_experiment_config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config_path = root / PROJECT_CONFIG_PATH
+    config = load_phase3a_config(root)
     expected = {
         "experiment_name": EXPERIMENT_NAME,
         "selected_sensor_ids": list(SENSORS),
@@ -2525,7 +2527,7 @@ def run_phase3a_protocol_equivalence(
         "provenance": {
             "input_sha256": _sha256(contract["input_path"]),
             "preparation_sha256": preparation_fingerprint(contract["monitoring_preparation"]),
-            "config_sha256": _sha256(root / "config" / "phase3a_experiment_config.json"),
+            "config_sha256": _sha256(root / PROJECT_CONFIG_PATH),
             "phase2_monitoring_sha256": _sha256(contract["phase2_path"]),
             "phase3_implementation_sha256": _sha256(contract["implementation_path"]),
             "runner_sha256": _sha256(contract["runner_path"]),
@@ -2798,7 +2800,7 @@ def _integrity_differences(
 def _failure_provenance(root: Path) -> dict[str, Any]:
     candidates = {
         "runner_sha256": Path(__file__).resolve(),
-        "config_sha256": root / "config" / "phase3a_experiment_config.json",
+        "config_sha256": root / PROJECT_CONFIG_PATH,
         "input_sha256": root / "artifacts" / "phase1_operational" / "phase1_aligned_temperature.csv",
         "publication_sha256": root / "artifacts" / "phase1_operational" / "phase1_run.json",
         "historical_phase2_baseline_sha256": (
@@ -2905,7 +2907,7 @@ def validation_provenance(root: Path) -> dict[str, str]:
     relative_paths = [
         "scripts/phase3_implement.py", "scripts/shared_monitoring_engine.py",
         "scripts/phase1_implement.ipynb",
-        "config/phase3a_experiment_config.json",
+        PROJECT_CONFIG_PATH.as_posix(),
         "artifacts/phase1_operational/phase1_aligned_temperature.csv",
         "artifacts/phase1_operational/phase1_run.json",
         "artifacts/phase3_operational/references/phase3a_phase2_baseline.json",
@@ -2970,7 +2972,7 @@ def _equivalence_provenance(root: Path, contract: dict[str, Any]) -> dict[str, A
     return {
         "input_sha256": _sha256(contract["input_path"]),
         "preparation_sha256": preparation_fingerprint(contract["monitoring_preparation"]),
-        "config_sha256": _sha256(root / "config" / "phase3a_experiment_config.json"),
+        "config_sha256": _sha256(root / PROJECT_CONFIG_PATH),
         "phase2_monitoring_sha256": _sha256(contract["phase2_path"]),
         "phase3_implementation_sha256": _sha256(contract["implementation_path"]),
         "runner_sha256": _sha256(Path(__file__)),
@@ -4762,7 +4764,7 @@ def _run_us325(
         "provenance": {
             "input_sha256": _sha256(contract["input_path"]),
             "preparation_sha256": preparation_fingerprint(contract["monitoring_preparation"]),
-            "config_sha256": _sha256(root / "config" / "phase3a_experiment_config.json"),
+            "config_sha256": _sha256(root / PROJECT_CONFIG_PATH),
             "phase2_monitoring_sha256": _sha256(contract["phase2_path"]),
             "phase3_implementation_sha256": _sha256(contract["implementation_path"]),
             "revised_phase2_baseline_sha256": _sha256(contract["revised_path"]),

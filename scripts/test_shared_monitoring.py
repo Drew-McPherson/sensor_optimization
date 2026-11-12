@@ -16,9 +16,11 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from scripts import shared_monitoring_engine as contract
 from scripts.shared_monitoring_engine import (
+    PROJECT_CONFIG_PATH,
     build_phase2_trace,
     build_phase3a_average_statistics_row,
     build_phase3a_average_values,
@@ -145,8 +147,9 @@ class Phase3AStatisticsTests(unittest.TestCase):
                 "production_script": "scripts/shared_monitoring_engine.py",
                 "status": "derived_from_aligned_input",
             })
-            config_path = root / "config" / "phase3a_experiment_config.json"
-            config_path.write_text(json.dumps(config))
+            config_path = root / PROJECT_CONFIG_PATH
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(yaml.safe_dump({"phase3a_experiment": config}))
             rows = make_rows([(1.0,) * 6, (2.0,) * 6, (3.0,) * 6])
             input_path = root / config["input_source"]
             with input_path.open("w", newline="") as stream:
@@ -156,13 +159,13 @@ class Phase3AStatisticsTests(unittest.TestCase):
             status = root / "artifacts" / "phase1_operational" / "phase1_run.json"
             repository = Path(__file__).resolve().parents[1]
             (root / "scripts").mkdir()
-            for relative in ("scripts/phase1_implement.ipynb", "config/transformation_defaults.yaml"):
+            for relative in ("scripts/phase1_implement.ipynb",):
                 (root / relative).write_bytes((repository / relative).read_bytes())
             status.write_text(json.dumps({
                 "schema_version": 1, "limited_run": False, "status": "passed",
                 "hashes": {"phase1_aligned_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest()},
                 "implementation_sha256": hashlib.sha256((root / "scripts" / "phase1_implement.ipynb").read_bytes()).hexdigest(),
-                "config_sha256": hashlib.sha256((root / "config" / "transformation_defaults.yaml").read_bytes()).hexdigest(),
+                "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
             }))
             before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
             prepared = prepare_monitoring(root)
@@ -719,9 +722,10 @@ class CorrectnessTests(unittest.TestCase):
 class MatchedProductionTests(unittest.TestCase):
     def create_matched_fixture(self, root):
         repository = Path(__file__).resolve().parents[1]
-        config = json.loads(
-            (repository / "config" / "phase3a_experiment_config.json").read_text()
+        project_config = yaml.safe_load(
+            (repository / PROJECT_CONFIG_PATH).read_text(encoding="utf-8")
         )
+        config = project_config["phase3a_experiment"]
         artifacts = root / "artifacts"
         artifacts.mkdir()
         references = artifacts / "phase3_operational" / "references"
@@ -730,8 +734,9 @@ class MatchedProductionTests(unittest.TestCase):
         (root / "config").mkdir()
         phase3_path = root / "scripts" / "phase3_implement.py"
         phase3_path.write_text("protected Phase 3 fixture")
-        config_path = root / "config" / "phase3a_experiment_config.json"
-        config_path.write_text(json.dumps(config))
+        config_path = root / PROJECT_CONFIG_PATH
+        project_config["phase3a_experiment"] = config
+        config_path.write_text(yaml.safe_dump(project_config))
         times = pd.date_range(config["start_timestamp_utc"], periods=19984, freq="min")
         frame = pd.DataFrame({
             "bucket_time_utc": [time.isoformat() for time in times],
@@ -743,13 +748,13 @@ class MatchedProductionTests(unittest.TestCase):
         frame.to_csv(input_path, index=False)
         publication_path = artifacts / "phase1_operational" / "phase1_run.json"
         publication_path.parent.mkdir(parents=True, exist_ok=True)
-        for relative in ("scripts/phase1_implement.ipynb", "config/transformation_defaults.yaml"):
+        for relative in ("scripts/phase1_implement.ipynb",):
             (root / relative).write_bytes((repository / relative).read_bytes())
         publication_path.write_text(json.dumps({
             "schema_version": 1, "limited_run": False, "status": "passed",
             "hashes": {"phase1_aligned_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest()},
             "implementation_sha256": hashlib.sha256((root / "scripts" / "phase1_implement.ipynb").read_bytes()).hexdigest(),
-            "config_sha256": hashlib.sha256((root / "config" / "transformation_defaults.yaml").read_bytes()).hexdigest(),
+            "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
         }))
         historical = {
             key: config[key] for key in (
@@ -880,7 +885,7 @@ class MatchedProductionTests(unittest.TestCase):
             config, frame, protected = self.create_matched_fixture(root)
             artifacts = root / "artifacts"
             input_path = artifacts / "phase1_operational" / "phase1_aligned_temperature.csv"
-            config_path = root / "config" / "phase3a_experiment_config.json"
+            config_path = root / PROJECT_CONFIG_PATH
             summary = run_phase3a_two_sided(root)
             self.assertEqual(summary["bucket_count"], 19984)
             self.assertEqual(
@@ -926,7 +931,11 @@ class MatchedProductionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "bucket_epoch"):
                 run_phase3a_two_sided(root)
             config["selected_sensor_ids"] = list("ABCDEF")
-            config_path.write_text(json.dumps(config))
+            project_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            project_config["phase3a_experiment"] = config
+            config_path.write_text(yaml.safe_dump(project_config))
+            publication["config_sha256"] = hashlib.sha256(config_path.read_bytes()).hexdigest()
+            publication_path.write_text(json.dumps(publication))
             with self.assertRaisesRegex(ValueError, "selected_sensor_ids"):
                 run_phase3a_two_sided(root)
 

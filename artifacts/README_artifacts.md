@@ -231,7 +231,8 @@ either directory.
 4. phase2_temperature_sensors.csv
 5. phase2_temperature_metrics.json
 6. transformation_qc_report.csv
-7. transformation_decisions.md
+7. Historical `transformation_decisions.md` (run records are preserved in
+   [project history](../project_history.md#transformation-run-records))
 8. phase3_sensor_history_events.csv
 9. phase3a_phase2_baseline.json
 8. phase3_sensor_history_events.csv

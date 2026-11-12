@@ -5,8 +5,8 @@ This repository contains the temperature sensor transformation and monitoring wo
 ## Repository layout
 
 - [AGENTS.md](AGENTS.md) — repository instructions and workflow rules for agents and contributors.
-- [instructions/README.md](instructions/README.md) — index for instruction-oriented documentation.
 - [Distributed_Monitoring_POC_Project_Plan.md](Distributed_Monitoring_POC_Project_Plan.md) — canonical project plan and implementation rules.
+- [project_history.md](project_history.md) — major decisions, pivots, discussions, and historical source records.
 - [scripts/README_scripts.md](scripts/README_scripts.md) — script usage and Phase 1/Phase 2/Phase 3 workflow notes.
 - [artifacts/README_artifacts.md](artifacts/README_artifacts.md) — generated artifact inventory and expectations.
 
@@ -181,13 +181,15 @@ summaries and byte-identical CSVs without rerunning the production dataset.
 
 ## Instruction documents
 
-Additional instruction-style documentation lives under [instructions](instructions):
-
-- [instructions/distributed_monitoring_notebook_required_changes.md](instructions/distributed_monitoring_notebook_required_changes.md)
+Repository-wide contributor instructions are in [AGENTS.md](AGENTS.md).
+The historical notebook-correction discussion is preserved in
+[project history](project_history.md#phase-2-notebook-corrections); it is not
+the current monitoring specification.
 
 ## Archive note
 
-The archived plan copy at [Archive/Distributed_Monitoring_POC_Project_Plan.md](Archive/Distributed_Monitoring_POC_Project_Plan.md) is intentionally preserved as historical reference material.
+An archived plan copy may be retained locally under `Archive/` as historical
+reference material; it is not a current project dependency.
 
 ## Source-only GitHub note
 

@@ -12,6 +12,24 @@ The untouched pre-normalization baseline (`US-0.01_original.md`) and entry-by-en
 
 ## 2026-11-12
 
+### Consolidated project history and updated the current plan (US-0.02)
+- **Context / trigger:** Major project decisions, pivots, discussions, and transformation run evidence were spread across the Phase 3A pivot plan and three Git-ignored documents; the project plan still assigned the pivot a governing role.
+- **Decision / change:** Updated the project plan first to incorporate applicable pivot requirements and later comparability decisions, then created `project_history.md` with a narrative and complete original source records. Removed the four superseded source files after verifying their preserved copies and history content, and updated current navigation and historical run-record references.
+- **Rationale:** Keeps the project plan as the current specification, the changelog as the dated change record, and one history document for detailed context without losing source evidence.
+- **Outcome / impact:** The pivot and historical discussions no longer govern current requirements. The project plan describes the derived P90, revised Phase 2/C0 gate, controlled comparisons, and current artifact layout; no code, configuration, scientific results, or generated artifacts changed. The 2026-11-10 decision record retains its original point-in-time status.
+- **Evidence / validation:** Verified exact source bytes and SHA-256 values against four recovery copies and the embedded history, checked 167 mapped source sections and all five transformation runs, and compared the revised control and alpha totals against 41 saved Phase 3 results. Checked relevant links and documentation whitespace; no runtime tests were run for this documentation-only change.
+- **Affected files / artifacts:** `project_history.md`, `Distributed_Monitoring_POC_Project_Plan.md`, `README.md`, `scripts/README_scripts.md`, `artifacts/README_artifacts.md`, `CHANGELOG.md`; removed `Phase3A_Pivot_Plan.md` and the three files in `Writing/Markdowns/` named in US-0.02. Original byte copies and the section mapping are retained in the session recovery directory documented in `project_history.md`.
+- **Related work:** US-0.02; US-3.23 through US-3.26.
+
+### Defined project history consolidation story (US-0.02)
+- **Context / trigger:** Major project decisions and implementation history are distributed across the Phase 3A pivot plan and three documents under `Writing/Markdowns/`, while the project plan still gives the pivot plan a governing role.
+- **Decision / change:** Created US-0.02 to update the project plan first and consolidate the four sources into a root-level `project_history.md`, with preservation, recovery, reference, and validation safeguards.
+- **Rationale:** Separating current requirements, dated changes, and detailed historical narrative reduces overlapping history files without losing the reasons and evidence behind project decisions.
+- **Outcome / impact:** The consolidation is planned, not implemented; existing history sources, project requirements, runtime behavior, and artifacts remain unchanged.
+- **Evidence / validation:** Story requirements are based on the user's approved consolidation approach and the reviewed source documents and project plan. No runtime tests were run for this documentation-only change.
+- **Affected files / artifacts:** `User Stories/US-0.02_consolidate_project_history.md`, `CHANGELOG.md`.
+- **Related work:** US-0.01.
+
 ### Consolidated project settings into one canonical configuration
 - **Context / trigger:** Runtime settings were split between a Phase 1 YAML file and a Phase 3A experiment JSON file; the YAML also retained disabled multivariate Phase 2 settings. The user requested one canonical file and a rule for future agentic changes to extend it rather than add more config files.
 - **Decision / change:** Replaced both config files with `config/project_config.yaml`, keeping Phase 1, quality, and Phase 3A settings in separate sections. Added a shared loader, updated Phase 1/2/3 consumers, tests and documentation, removed unused multivariate settings, and documented the single-file rule in `AGENTS.md`. A regression test requires this to remain the only file in `config/`.

@@ -25,6 +25,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from scripts import phase3_implement as history_module
 from scripts import phase3_implement as implementation
@@ -56,15 +57,18 @@ from scripts.phase3_implement import (
     smic_allocation,
 )
 from scripts.shared_monitoring_engine import (
+    PROJECT_CONFIG_PATH,
     build_phase2_trace,
     evaluate_root_states,
+    load_phase3a_config,
     root_correctness_summary,
     prepare_monitoring,
 )
 
 
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "phase3a_experiment_config.json"
-PHASE3A_CONFIG = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = REPOSITORY_ROOT / PROJECT_CONFIG_PATH
+PHASE3A_CONFIG = load_phase3a_config(REPOSITORY_ROOT)
 normalize_sensor_histories = history_module.normalize_sensor_histories
 build_alpha_clustering_inputs = history_module.build_alpha_clustering_inputs
 PHASE3_ALPHA_VALUES = history_module.PHASE3_ALPHA_VALUES
@@ -419,6 +423,15 @@ class Phase3AExecutionTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ValueError, "cohort must remain exactly"):
             validate(modified)
+
+    def test_project_configuration_is_single_canonical_file_without_retired_settings(self):
+        config_files = sorted(path.name for path in CONFIG_PATH.parent.iterdir() if path.is_file())
+        self.assertEqual(config_files, ["project_config.yaml"])
+        project_config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+        self.assertNotIn("phase2", project_config)
+        self.assertNotIn("join_tolerance_seconds", project_config["global"])
+        self.assertNotIn("intra_bucket_aggregation", project_config["global"])
+        self.assertNotIn("phase2_aligned", project_config["artifacts"])
 
     def test_matched_phase2_summary_counts_and_reconciles_messages(self):
         runtime = self.runtime(self.controlled_phase2_builder)
@@ -1011,7 +1024,10 @@ print("import-safe")
 
     def test_runner_validates_provenance_preserves_baseline_and_exports_only_compact_files(self):
         repository = Path(__file__).resolve().parents[1]
-        config = json.loads((repository / "config" / "phase3a_experiment_config.json").read_text())
+        project_config = yaml.safe_load(
+            (repository / PROJECT_CONFIG_PATH).read_text(encoding="utf-8")
+        )
+        config = project_config["phase3a_experiment"]
         baseline = {
             key: config[key] for key in (
                 "experiment_name", "input_source", "selected_sensor_ids",
@@ -1039,7 +1055,10 @@ print("import-safe")
             config["end_timestamp_utc"] = times[-1].isoformat()
             config["expected_bucket_count"] = 3
             config["expected_elapsed_minutes"] = 2
-            (root / "config" / "phase3a_experiment_config.json").write_text(json.dumps(config))
+            project_config["phase3a_experiment"] = config
+            config_path = root / PROJECT_CONFIG_PATH
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(yaml.safe_dump(project_config), encoding="utf-8")
             frame = pd.DataFrame({
                 "bucket_epoch": [int(time.timestamp()) for time in times],
                 "bucket_time_utc": [time.isoformat() for time in times],
@@ -1050,14 +1069,14 @@ print("import-safe")
             publication = root / "artifacts" / "phase1_operational" / "phase1_run.json"
             publication.parent.mkdir(parents=True, exist_ok=True)
             (root / "scripts").mkdir()
-            for relative in ("scripts/phase1_implement.ipynb", "config/transformation_defaults.yaml"):
+            for relative in ("scripts/phase1_implement.ipynb",):
                 (root / relative).write_bytes((Path(__file__).resolve().parents[1] / relative).read_bytes())
             publication.write_text(json.dumps({
                 "schema_version": 1, "limited_run": False, "status": "passed", "hashes": {
                     "phase1_aligned_sha256": hashlib.sha256((root / config["input_source"]).read_bytes()).hexdigest(),
                 },
                 "implementation_sha256": hashlib.sha256((root / "scripts" / "phase1_implement.ipynb").read_bytes()).hexdigest(),
-                "config_sha256": hashlib.sha256((root / "config" / "transformation_defaults.yaml").read_bytes()).hexdigest(),
+                "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
             }))
             baseline.update({
                 "end_timestamp_utc": config["end_timestamp_utc"], "bucket_count": 3,
@@ -1993,7 +2012,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             root = Path(temporary)
             (root / "artifacts").mkdir()
             (root / "config").mkdir()
-            (root / "config" / "phase3a_experiment_config.json").write_text("{}")
+            (root / PROJECT_CONFIG_PATH).write_text("{}")
             output = root / "candidate"
             with mock.patch.object(
                 implementation, "_validate_contract", return_value={}
@@ -2286,7 +2305,7 @@ class ControlAndDiagnosticTests(unittest.TestCase):
             root = Path(temporary_directory)
             (root / "artifacts").mkdir()
             (root / "config").mkdir()
-            (root / "config" / "phase3a_experiment_config.json").write_text(
+            (root / PROJECT_CONFIG_PATH).write_text(
                 "{}", encoding="utf-8"
             )
             call_order = []
@@ -3370,7 +3389,7 @@ class SavedOutputValidationTests(unittest.TestCase):
             self.assertEqual(list(directory.iterdir()), [])
 
     def test_full_precision_threshold_is_consumed_without_rounding(self):
-        config = json.loads((ROOT / "config" / "phase3a_experiment_config.json").read_text())
+        config = load_phase3a_config(ROOT)
         preparation = prepare_monitoring(ROOT)
         threshold = preparation["p90_value"]
         self.assertEqual(threshold, 22.428666649999997)

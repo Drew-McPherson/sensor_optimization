@@ -1,5 +1,12 @@
 # Transformation Script Usage
 
+## Project configuration
+
+[`config/project_config.yaml`](../config/project_config.yaml) is the single
+maintained configuration file for project runtime and experiment settings.
+Update its existing sections instead of adding another project config file.
+Dependency and tool manifests such as `requirements.txt` remain separate.
+
 ## Phase 1 implementation (US-1.16)
 
 The canonical implementation is [`phase1_implement.ipynb`](phase1_implement.ipynb).
@@ -123,7 +130,7 @@ configuration, receipt, or analysis notebook was rewritten.
 Build the Phase 1 (temperature-only) aligned dataset with explicit audit artifacts, quality metrics, and gate checks.
 
 ## Inputs
-1. Config: `config/transformation_defaults.yaml`
+1. Config: `config/project_config.yaml`
 2. Data directory: `Data/files_csv`
 
 Source discovery explicitly excludes the aggregate `temperature_raw.csv`
@@ -146,7 +153,8 @@ temperature, or average changes. The quantitative comparison is in
 2. `artifacts/aligned_phase1_temperature.csv`
 3. `artifacts/phase1_average_statistics.csv`
 4. `artifacts/transformation_qc_report.csv`
-5. `artifacts/transformation_decisions.md`
+5. Historical `artifacts/transformation_decisions.md` (original run records are
+   preserved in [project history](../project_history.md#transformation-run-records)).
 
 For a source-only repository, these outputs are generated locally and may be absent until you run the pipeline.
 
@@ -243,8 +251,8 @@ without overwriting the original reports:
   and can be large; it is header-only when the record multisets match.
 
 The duplicate-row rate is `100 * excess duplicate rows / valid temperature rows`.
-The mode reads the gate from `config/transformation_defaults.yaml` (override
-with `--config`) using the project's existing PyYAML dependency. It reports both
+The mode reads the gate from `config/project_config.yaml` (an explicit `--config`
+override is available for isolated use) using the project's existing PyYAML dependency. It reports both
 strictly below the configured threshold and Phase 1's actual rule:
 round the rate to six decimals, then compare with `<=`. Empty temperature
 populations have null gate results rather than being presented as passing.
@@ -833,12 +841,14 @@ US-3.18 through US-3.31 sections below retain scientific context and migration
 history; archived validation/recovery commands apply only inside their restored
 historical checkout. They are not additional active entry points.
 
-`config/phase3a_experiment_config.json` is the authoritative Phase 3A definition:
+The `phase3a_experiment` section of `config/project_config.yaml` is the
+authoritative Phase 3A definition:
 it records the aligned input, fixed A/C/D/E/F/G cohort, inclusive interval,
 19,984 expected buckets, 60-second sampling, baseline alpha 0.10, boundary
-convention, and authoritative `phase3a_stable_cohort` P90. The P90 is generated
-by `scripts/build_phase1_temperature.py` using the Phase 1 linear-interpolation
-percentile rule and is retained at full precision. The historical
+convention, and authoritative `phase3a_stable_cohort` P90 policy. The P90 is
+derived by `scripts/shared_monitoring_engine.py` using linear interpolation
+and retained at full precision in run evidence, not embedded as a configured
+value. The historical
 `all_devices_observed` statistics row remains unchanged.
 
 [`phase3_implement.py`](phase3_implement.py) runs Phase 3A over the fixed
