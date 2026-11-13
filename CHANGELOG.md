@@ -12,6 +12,51 @@ The untouched pre-normalization baseline (`US-0.01_original.md`) and entry-by-en
 
 ## 2026-11-12
 
+### Implemented the US-4.04 alpha-sensitivity analysis
+- **Context / trigger:** US-4.04 requires a saved-evidence comparison of all tested FMIC/SMIC alpha values against their matched singleton controls, including discrete break-even regions, exploratory minima, and a new conditional-transmission figure.
+- **Decision / change:** Extended the Phase 3 analysis notebook with a 19-pair table, control-difference and percentage checks against saved summaries, beat/tie/lose regions and reversals, dynamic 1%/5% near-minimum bands, adjacent-alpha changes, and Figure 4.4. Relabeled the existing Figure 4.3 and Figure 4.5 views and clarified fixed benchmarks. Updated the analysis usage documentation.
+- **Rationale:** The validated current bundle already contains the full alpha grid, matched controls, and saved minima; deriving and checking the analysis from those rows avoids new monitor runs, interpolation, or duplicated evidence.
+- **Outcome / impact:** In the current run, both methods first beat their matched controls at tested alpha 0.60, remain below control through 0.90, then lose at 0.95; both exploratory minima are 0.65. The 1% bands are 0.60/0.65/0.70 and the 5% bands are 0.35–0.95 for both methods. At prespecified alpha 0.10, FMIC/SMIC use 2,958/2,940 more transmissions than C1/C2 while each has 164 fewer root synchronization operations. No monitoring behavior, saved scientific evidence, or generated artifact changed.
+- **Evidence / validation:** Loaded the current bundle through the notebook's validated saved-results loader; all 13 notebook code cells and in-memory acceptance assertions passed in a fresh Python kernel. Assertions verified 19 points per method, all four figure titles, saved matched-control differences/denominators, current minima, and pathway reconciliation. All notebook code cells compiled. `git diff --check` passed.
+- **Affected files / artifacts:** `scripts/phase3_analyze.ipynb`, `scripts/README_scripts.md`, `CHANGELOG.md`.
+- **Related work:** US-4.04; US-4.05 provides the detailed transmission-category analysis.
+
+### Implemented the US-4.03 allowance-only analysis
+- **Context / trigger:** US-4.03 requires C0/C1/C2 message and synchronization contrasts under the six-singleton protocol, plus genuine C1/C2 allowance examples from current saved snapshots.
+- **Decision / change:** Extended the Phase 3 analysis notebook with reconciled control totals and pairwise contrasts, separate synchronization-operation and transmission costs, pathway differences, and independently selected C1/C2 snapshot examples. Added checks for moment-derived weights, the all-zero fallback, singleton allocations, actual event times, and the current snapshot hash. Updated the notebook usage documentation.
+- **Rationale:** Existing validated controls and snapshots support the allowance-only comparison without rerunning monitoring. The exact tables and genuine event examples communicate the finding without an additional Figure 4.2; C0 remains aggregate-only because it has no saved Phase 3 snapshot.
+- **Outcome / impact:** In the current run, C0/C1/C2 record 9,159/8,964/8,962 transmissions. Relative to C0, C1 and C2 use 195 (2.129%) and 197 (2.151%) fewer transmissions; C2 uses 2 (0.022%) fewer than C1. C1/C2 each have 10 fewer root synchronizations than C0; their root-synchronization transmission cost is 180 lower, distinct from 15/17 fewer coordinator-root escalation transmissions. No monitoring behavior, saved evidence, or generated artifact changed.
+- **Evidence / validation:** Loaded the current validated run (`2026-11-12T22:58:38.165659+00:00`); validated 457 actual synchronization snapshots each for C1 and C2, including one explicit all-zero fallback per method and no C0 snapshots. Notebook JSON and code cells passed validation/compilation, the full notebook executed in a clean Python 3.13 kernel, and `git diff --check` passed. No separate monitoring test suite was run.
+- **Affected files / artifacts:** `scripts/phase3_analyze.ipynb`, `scripts/README_scripts.md`, `CHANGELOG.md`.
+- **Related work:** US-3.25, US-4.03.
+
+### Implemented the US-4.02 Phase 2 communication analysis
+- **Context / trigger:** US-4.02 requires a current-evidence analysis of Phase 2 transmission savings, communication-active and message-free minutes, and root-synchronization cadence without treating synchronization-only events as a complete minute trace.
+- **Decision / change:** Extended the existing Phase 2 analysis notebook to validate the current matched trace, UTC grid, message reconciliation, event timestamps, hashes, and independent receipt. Added per-category transmissions per evaluated minute, active/quiet counts, initialization-inclusive synchronization operations, interval distribution and P2.2, triggering-sensor/co-trigger counts, and weekday concentration.
+- **Rationale:** The matched trace is the complete one-row-per-bucket source for quiet minutes and communication totals; the event file is limited to synchronization timestamps and event-level diagnostics. Keeping these sources distinct also separates operations from message counts and synchronization cadence from latency.
+- **Outcome / impact:** The current 19,984-bucket run reports 9,159 transmissions, 92.36% fewer than the 119,904 one-way centralized reference, 467 communication-active and 19,517 message-free minutes, 467 synchronizations including initialization, and 466 inter-synchronization intervals (median 3 minutes, P90 77 minutes, maximum 3,372 minutes; trailing time 1 minute). No monitor behavior or saved operational evidence changed.
+- **Evidence / validation:** Loaded the current result through `load_validated(ROOT)` and executed the notebook in a fresh Python 3.13 Jupyter kernel using the current saved evidence; all nine code cells passed and the P2.2 figure rendered. Pylance syntax, notebook JSON/code-cell compilation, and `git diff --check` passed. No separate unit-test suite was run.
+- **Affected files / artifacts:** `scripts/phase2_analyze.ipynb`, `scripts/README_scripts.md`, `CHANGELOG.md`.
+- **Related work:** US-3.23, US-4.02.
+
+### Aligned Phase 4 analysis stories with current evidence
+- **Context / trigger:** Review found that the Phase 4 story registry cited retired configuration paths and Phase 2 modules, omitted the full-minute Phase 2 and selected Phase 3 traces, and incorrectly described selected check-time deviations as unavailable.
+- **Decision / change:** Updated the Phase 4 stories to use the active YAML config, aligned Phase 1 publication, shared Phase 2 loader and artifacts, and current Phase 3 manifest/loader contracts. Specified that Phase 2 quiet-minute analysis uses the matched trace, and that check-time cancellation analysis is limited to the US-3.37 selected trace; replaced the stale P90-statistics-row assumption with the run-derived threshold contract.
+- **Rationale:** Stories must match the maintained implementation and evidence granularity so that Phase 4 can be implemented without searching for nonexistent files, misusing synchronization-only records, or commissioning an unnecessary trace.
+- **Outcome / impact:** Planning/documentation only. No notebook, monitoring behavior, configuration, source data, or generated artifact changed.
+- **Evidence / validation:** Compared story paths and requirements with `config/project_config.yaml`, current Phase 1/2/3 source and notebook contracts, `load_validated(...)`, `load_phase3_analysis_results(...)`, and active Phase 2/Phase 3 output schemas and row counts. No runtime tests were run for this documentation-only change.
+- **Affected files / artifacts:** `User Stories/US-4.01_to_US-4.07_phase_4_analysis_user_stories.md`, `CHANGELOG.md`.
+- **Related work:** US-3.23, US-3.24, US-3.25, US-3.37.
+
+### Implemented the US-4.01 comparative baseline analysis
+- **Context / trigger:** US-4.01 requires the current Phase 2/C0 reference, singleton controls, and prespecified alpha 0.10 results to be compared with transparent transmission denominators and correctness evidence.
+- **Decision / change:** Extended the existing saved-results analysis notebook with an RQ1 table, split-panel Figure 4.1, and concise findings. Phase 2/C0 is represented once; matched singleton contrasts, one-way centralized comparison, root synchronizations, and false-safe/false-violated counts are reported separately.
+- **Rationale:** Reusing the validated bundle keeps analysis read-only and prevents the 119,904 one-way centralized reports from compressing distinctions among the monitored methods.
+- **Outcome / impact:** The prespecified FMIC/SMIC results are shown as unfavorable on total transmissions versus their matched singleton controls and Phase 2/C0, despite fewer root synchronizations. No production, monitoring, CSV/JSON, operational, or historical artifact was changed.
+- **Evidence / validation:** Current saved run `2026-11-12T22:58:38.165659+00:00` loaded with 3 controls, 38 clustered rows, 19,984-bucket Phase 2/C0 equivalence, and zero false-safe/false-violated counts in all 41 Phase 3 rows. Executed a temporary notebook copy from a clean kernel with no cell errors; notebook input-hash checks passed.
+- **Affected files / artifacts:** `scripts/phase3_analyze.ipynb`, `User Stories/US-4.01_to_US-4.07_phase_4_analysis_user_stories.md`, `CHANGELOG.md`.
+- **Related work:** US-3.24, US-4.01, US-4.04.
+
 ### Planned selected-configuration Phase 3 minute trace (US-3.37)
 - **Context / trigger:** The Phase 2 matched trace makes each minute inspectable, while Phase 3 currently publishes aggregate results and selected synchronization snapshots across many configurations.
 - **Decision / change:** Added a story for one combined Phase 3 minute trace covering C1, C2, alpha 0.10, and all tied minimum-message alphas for FMIC and SMIC, with deduplication, provenance, recovery, and reconciliation requirements.

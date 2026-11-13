@@ -341,7 +341,7 @@ as Phase 3:
 |---|---|
 | [`phase2_implement.ipynb`](phase2_implement.ipynb) | Runs the shared engine and publishes the summary to `artifacts/phase2_outputs/` and events to `artifacts/phase2_operational/`. |
 | [`phase2_test.ipynb`](phase2_test.ipynb) | Runs the Phase 2 regression suites without skips, reproduces the saved run in isolation, and writes the independent operational validation receipt without changing the summary or events. |
-| [`phase2_analyze.ipynb`](phase2_analyze.ipynb) | Validates current saved summary/event provenance and presents the matched experiment, existing communication comparison, correctness, synchronization diagnostics, event-field guide, and limitations without running code that produces results or exporting files. |
+| [`phase2_analyze.ipynb`](phase2_analyze.ipynb) | Validates the current summary, matched-trace grid, event provenance, and independent receipt; presents message totals/rates, active and quiet minutes, synchronization intervals (P2.2), trigger/co-trigger and weekday diagnostics, correctness, and limitations without producing or exporting artifacts. |
 
 Open each notebook with the project Python kernel and use **Restart Kernel and
 Run All**. The implementation notebook runs only `phase3a_stable_cohort`; no
@@ -1753,6 +1753,26 @@ Open [`phase3_analyze.ipynb`](phase3_analyze.ipynb), select the project kernel,
 set `OUTPUT_DIR` if needed in its settings cell and **Restart Kernel and Run All**.
 The default is `artifacts/phase3_outputs`; normal execution writes no scientific
 results or PNGs. See [settings and optional historical/export views](#us-331-saved-results-only-analysis-notebook).
+
+The US-4.03 section isolates allowance allocation across the validated C0/C1/C2
+singleton controls. Its tables reconcile transmissions, synchronization
+operations, coordinator escalations and communication pathways. C1/C2 allowance
+examples use their own current synchronization snapshots, check the source
+moment-to-weight calculations and the six-root-allowance sum, and distinguish
+the explicit all-zero fallback. C0 has no Phase 3 snapshot; no C0 sensor
+allowances are inferred. This analysis remains read-only and needs no additional
+figure or saved artifact.
+
+The US-4.04 section compares all 19 tested alpha values for each clustered method
+with its matching fixed singleton control. It validates the saved differences and
+percent denominators, reports discrete beat/tie/lose regions and adjacent-alpha
+changes, and recalculates the exploratory minimum plus 1%/5% near-minimum bands
+from current rows. Figure 4.4 shows actual transmissions saved against each
+matched control, with alpha 0.10 and the tested-grid minima marked; it does not
+interpolate a break-even value. The existing Figure 4.3 total-transmission view
+and Figure 4.5 synchronization/cluster-count views remain in place, with singleton
+controls labeled as fixed benchmarks. This analysis adds no monitor run, trace,
+or saved scientific artifact; US-4.05 analyzes the seven transmission categories.
 
 Additional check modes:
 
